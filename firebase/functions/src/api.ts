@@ -13,6 +13,7 @@ const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
 const VALID_ROUTES = [
   "GET /health",
   "POST /orgs",
+  "PATCH /orgs/:orgId",
   "GET /orgs/:orgId/invites/:inviteId",
   "POST /orgs/:orgId/invites/:inviteId/accept",
   "DELETE /orgs/:orgId/members/:uid",

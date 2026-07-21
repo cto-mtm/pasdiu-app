@@ -1,5 +1,5 @@
 import express from "express";
-import { FieldValue, getFirestore } from "firebase-admin/firestore";
+import { FieldValue, getFirestore, QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { requireAuth } from "../helpers/auth.js";
 import {
   ApiError,
@@ -65,6 +65,67 @@ orgsRouter.post(
     await batch.commit();
 
     res.status(201).json({ orgId: orgRef.id });
+  })
+);
+
+// PATCH /orgs/:orgId — rename (managers). The org name is denormalized onto
+// every member doc (it powers the org switcher and membership lists), and
+// clients may not touch member docs' orgName, so the rename and the fan-out
+// happen here in chunked batches. Invites need no fan-out — the invite
+// endpoint reads the org doc live.
+const RENAME_COOLDOWN_MS = 5_000;
+
+orgsRouter.patch(
+  "/:orgId",
+  asyncHandler(async (req, res) => {
+    const user = userOf(req);
+    const { orgId } = req.params;
+    const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+    if (!name || name.length > 60) {
+      throw new ApiError(400, "invalid_name");
+    }
+
+    const db = getFirestore();
+    await requireManagerOf(db, orgId, user.uid);
+    const orgRef = db.doc(`orgs/${orgId}`);
+    const orgSnap = await orgRef.get();
+    if (!orgSnap.exists) throw new ApiError(404, "org_not_found");
+
+    // Rate-limit: reject if renamed less than 5 s ago.
+    const lastRenamed = orgSnap.get("renamedAt");
+    if (lastRenamed && typeof lastRenamed.toMillis === "function") {
+      const elapsed = Date.now() - (lastRenamed.toMillis() as number);
+      if (elapsed < RENAME_COOLDOWN_MS) {
+        throw new ApiError(429, "rename_cooldown");
+      }
+    }
+
+    // Fan-out to member docs in chunked batches (Firestore limit: 500 ops).
+    const members = await orgRef.collection("members").get();
+    const BATCH_LIMIT = 499; // reserve 1 slot for the org doc in the first batch
+    const chunks: QueryDocumentSnapshot[][] = [];
+    for (let i = 0; i < members.docs.length; i += BATCH_LIMIT) {
+      chunks.push(members.docs.slice(i, i + BATCH_LIMIT));
+    }
+
+    // First batch: update org doc + first chunk of members.
+    const firstBatch = db.batch();
+    firstBatch.update(orgRef, {
+      name,
+      renamedAt: FieldValue.serverTimestamp(),
+      renamedBy: user.uid,
+    });
+    for (const m of (chunks[0] ?? [])) firstBatch.update(m.ref, { orgName: name });
+    await firstBatch.commit();
+
+    // Remaining chunks (if any) in separate batches.
+    for (const chunk of chunks.slice(1)) {
+      const b = db.batch();
+      for (const m of chunk) b.update(m.ref, { orgName: name });
+      await b.commit();
+    }
+
+    res.json({ orgId, name });
   })
 );
 

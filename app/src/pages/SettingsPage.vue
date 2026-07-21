@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
@@ -14,6 +14,7 @@ import { openExternal } from '../lib/native'
 import type { BillingConfig, BillingInterval, Plan } from '../lib/types'
 import LocaleSwitcher from '../components/LocaleSwitcher.vue'
 import BaseButton from '../components/BaseButton.vue'
+import BaseInput from '../components/BaseInput.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import SegmentedControl from '../components/SegmentedControl.vue'
 import ImportWizard from '../components/ImportWizard.vue'
@@ -30,6 +31,37 @@ const { has, usage, limits } = useEntitlements()
 useDocumentTitle(computed(() => t('settings.title')))
 
 const showImport = ref(false)
+
+// ── Workspace rename (managers) ─────────────────────────────────
+// The input tracks the live org name (the doc can arrive after mount or be
+// renamed by another manager) but stops syncing once the user starts editing.
+const currentOrgName = computed(() => auth.org?.name ?? auth.activeMembership?.orgName ?? '')
+const orgName = ref('')
+const userEditing = ref(false)
+watch(currentOrgName, (n) => { if (!userEditing.value) orgName.value = n }, { immediate: true })
+const { busy: renameBusy, run: runRename } = useBusy()
+const nameDirty = computed(() => {
+  const next = orgName.value.trim()
+  return next.length > 0 && next.length <= 60 && next !== currentOrgName.value
+})
+
+// Mark editing on first keystroke; reset after a successful save.
+function onNameInput(value: string): void {
+  orgName.value = value
+  userEditing.value = true
+}
+
+async function saveOrgName(): Promise<void> {
+  await runRename(async () => {
+    const ok = await auth.renameOrg(orgName.value.trim())
+    if (ok) {
+      userEditing.value = false
+      toast.success(t('settings.renamed'))
+    } else {
+      toast.error(auth.error ?? t('common.saveError'))
+    }
+  })
+}
 
 // Usage bars: one row per counter. -1 = unlimited (no bar, translatable
 // "unlimited" label); the fill fraction is clamped so an over-limit
@@ -209,6 +241,19 @@ onMounted(() => {
       <div class="rounded-xl border p-5" style="background: var(--surface); border-color: var(--border);">
         <h2 class="text-sm font-semibold uppercase tracking-wide" style="color: var(--text-muted);">{{ t('settings.language') }}</h2>
         <div class="mt-3"><LocaleSwitcher /></div>
+      </div>
+
+      <!-- Workspace (managers): rename. The API fans the new name out to the
+           denormalized member docs, so the switcher updates for everyone. -->
+      <div v-if="auth.isManager" class="rounded-xl border p-5" style="background: var(--surface); border-color: var(--border);">
+        <h2 class="text-sm font-semibold uppercase tracking-wide" style="color: var(--text-muted);">{{ t('settings.workspace') }}</h2>
+        <p class="mt-1 text-sm" style="color: var(--text-muted);">{{ t('settings.renameHint') }}</p>
+        <form class="mt-3 flex items-center gap-2" @submit.prevent="saveOrgName">
+          <BaseInput :modelValue="orgName" @update:modelValue="onNameInput" class="flex-1" maxlength="60" required />
+          <BaseButton type="submit" :disabled="renameBusy || !nameDirty">
+            {{ renameBusy ? t('common.loading') : t('settings.renameCta') }}
+          </BaseButton>
+        </form>
       </div>
 
       <!-- Import (managers; paid plans only — the wizard stays unmountable on Free) -->

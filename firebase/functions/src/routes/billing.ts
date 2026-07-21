@@ -17,10 +17,10 @@ import {
   PAID_PLAN_IDS,
 } from "../helpers/stripeHandlers.js";
 import {
-  appUrl,
   billingEnabled,
   getStripe,
   priceIdFor,
+  returnOrigin,
 } from "../helpers/stripe.js";
 import type { BillingInterval } from "../helpers/stripe.js";
 import { DISPLAY_PRICES } from "../plans.js";
@@ -112,8 +112,8 @@ billingRouter.post(
       line_items: [{ price: await priceIdFor(plan, interval), quantity }],
       subscription_data: { metadata: { orgId, plan } },
       metadata: { orgId, plan },
-      success_url: `${appUrl()}/settings?billing=success`,
-      cancel_url: `${appUrl()}/settings?billing=cancelled`,
+      success_url: `${returnOrigin(req)}/settings?billing=success`,
+      cancel_url: `${returnOrigin(req)}/settings?billing=cancelled`,
     });
     res.json({ url: session.url });
   })
@@ -139,7 +139,7 @@ billingRouter.post(
 
     const session = await getStripe().billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${appUrl()}/settings`,
+      return_url: `${returnOrigin(req)}/settings`,
     });
     res.json({ url: session.url });
   })

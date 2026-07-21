@@ -24,7 +24,7 @@ import {
 } from 'firebase/firestore'
 import { FirebaseError } from 'firebase/app'
 import { auth, db } from '../lib/firebase'
-import { acceptInviteApi, createOrgApi } from '../lib/api'
+import { acceptInviteApi, createOrgApi, renameOrgApi } from '../lib/api'
 import { identify, resetAnalytics, track } from '../lib/analytics'
 import { mapMember, mapMembership, mapOrg, mapUsage } from '../lib/mappers'
 import { i18n } from '../i18n'
@@ -409,6 +409,29 @@ export const useAuthStore = defineStore('auth', () => {
     return true
   }
 
+  // Rename the active workspace (managers; enforced server-side). The API
+  // fans the new name out to the denormalized member docs, so refresh the
+  // memberships list (org switcher); the org doc itself updates via its live
+  // subscription.
+  async function renameOrg(name: string): Promise<boolean> {
+    const orgId = activeOrgId.value
+    if (!orgId) return false
+    error.value = null
+    const res = await renameOrgApi(orgId, name)
+    if (!res.ok) {
+      const codeMap: Record<string, string> = {
+        invalid_name: 'common.invalidName',
+        rename_cooldown: 'common.renameCooldown',
+        org_not_found: 'common.orgNotFound',
+      }
+      const key = (res.error.code && codeMap[res.error.code]) || res.error.key
+      error.value = t(key, res.error.params ?? {})
+      return false
+    }
+    await refreshMemberships()
+    return true
+  }
+
   // Returns the API error code on failure (e.g. 'seat_limit' when the org has
   // no free seats) so InvitePage can render gate-specific states.
   async function acceptInvite(
@@ -484,6 +507,7 @@ export const useAuthStore = defineStore('auth', () => {
     loginWithGoogle,
     signup,
     createOrg,
+    renameOrg,
     acceptInvite,
     resetPassword,
     logout,

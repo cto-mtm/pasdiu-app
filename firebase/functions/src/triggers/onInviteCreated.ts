@@ -1,10 +1,11 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { logger } from "firebase-functions/v2";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
-import { defineSecret } from "firebase-functions/params";
 import { sendInviteEmailFor } from "../helpers/inviteMail.js";
 
-const resendApiKeySecret = defineSecret("RESEND_API_KEY");
+// NOTE: this function needs no secrets — invite emails are queued as mail/
+// docs and delivered by the firestore-send-email extension, which holds its
+// own credentials (RESEND_API_KEY lives in the extension config, not here).
 
 // Invite email: when a manager creates an invite (client-side write, gated by
 // firestore.rules), render the localized email and queue it as a `mail` doc
@@ -15,8 +16,6 @@ export const onInviteCreated = onDocumentCreated(
   {
     document: "orgs/{orgId}/invites/{inviteId}",
     region: "us-east5",
-    // Secret Manager injection in prod; the emulator reads functions/.env.
-    secrets: [resendApiKeySecret],
   },
   async (event) => {
     if (!event.data) return;

@@ -15,6 +15,21 @@ export function appUrl(): string {
   return process.env.APP_URL || "http://localhost:5173";
 }
 
+/**
+ * Origin for Stripe return URLs. An explicit APP_URL always wins; otherwise
+ * follow the calling web app's own https Origin, so billing needs zero origin
+ * config on any domain. Non-https origins (the Capacitor shells'
+ * capacitor://localhost / http://localhost) fall back to appUrl() — Stripe
+ * couldn't send the browser back to those anyway. Reflecting Origin is safe
+ * here: it only decides where the CALLER's own browser lands after checkout.
+ */
+export function returnOrigin(req: { headers: { origin?: string } }): string {
+  if (process.env.APP_URL) return appUrl();
+  const origin = req.headers.origin;
+  if (typeof origin === "string" && origin.startsWith("https://")) return origin;
+  return appUrl();
+}
+
 /** Cache for dynamically fetched Stripe price IDs */
 let dynamicPriceCache: Record<string, string> | null = null;
 let dynamicPriceCacheTime = 0;

@@ -77,6 +77,13 @@ export function createOrgApi(name: string): Promise<ApiResult<{ orgId: string }>
   return apiFetch<{ orgId: string }>('/orgs', { method: 'POST', body: JSON.stringify({ name }) })
 }
 
+export function renameOrgApi(orgId: string, name: string): Promise<ApiResult<{ orgId: string; name: string }>> {
+  return apiFetch<{ orgId: string; name: string }>(`/orgs/${orgId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  })
+}
+
 export function fetchInviteApi(orgId: string, inviteId: string): Promise<ApiResult<InviteInfo>> {
   return apiFetch<InviteInfo>(`/orgs/${orgId}/invites/${inviteId}`)
 }
