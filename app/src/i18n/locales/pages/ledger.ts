@@ -1,0 +1,39 @@
+const en = {
+  title: 'Export Ledger',
+  subtitle: 'Completed work, ready for payroll or accounting.',
+  export: 'Export CSV',
+  empty: 'No completed tasks match these filters.',
+  filterClient: 'Client',
+  filterContractor: 'Assignee',
+  filterStatus: 'Status',
+  all: 'All',
+  from: 'From',
+  to: 'To',
+  colTask: 'Task',
+  colClient: 'Client',
+  colProject: 'Project',
+  colContractor: 'Contractor',
+  colStatus: 'Status',
+  colCompleted: 'Completed',
+}
+
+const es: typeof en = {
+  title: 'Registro de exportación',
+  subtitle: 'Trabajo completado, listo para nóminas o contabilidad.',
+  export: 'Exportar CSV',
+  empty: 'Ninguna tarea completada coincide con estos filtros.',
+  filterClient: 'Cliente',
+  filterContractor: 'Responsable',
+  filterStatus: 'Estado',
+  all: 'Todos',
+  from: 'Desde',
+  to: 'Hasta',
+  colTask: 'Tarea',
+  colClient: 'Cliente',
+  colProject: 'Proyecto',
+  colContractor: 'Colaborador',
+  colStatus: 'Estado',
+  colCompleted: 'Completado',
+}
+
+export default { en, es }

@@ -1,0 +1,12 @@
+{
+  "name": "pasdiu-firebase",
+  "private": true,
+  "scripts": {
+    "emulators": "npm --prefix functions run build && firebase emulators:start --only auth,functions,firestore --project demo-app",
+    "emulators:all": "npm --prefix functions run build && firebase emulators:start --project demo-app",
+    "emulators:watch": "firebase emulators:start --only auth,functions,firestore --project demo-app",
+    "seed": "npm --prefix functions run seed",
+    "test": "node --test rules-test/firestore.rules.test.mjs",
+    "test:integration": "firebase emulators:exec --only firestore,auth --project demo-app \"npm --prefix functions test\""
+  }
+}

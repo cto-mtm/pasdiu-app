@@ -1,0 +1,339 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────
+// Pasdiu Firestore rules — multi-tenant (orgs) + role-based with
+// client scoping. Tenancy source of truth: orgs/{orgId}/members/{uid}
+// (role + clientId live there; users/{uid} is global identity only).
+//
+// IMPORTANT: Firestore rejects a whole query if it *could* return a document
+// the user can't read. Every domain read rule below is keyed on
+// resource.data.orgId, so the app must issue org-filtered queries
+// (where('orgId','==', activeOrgId)) for clients/projects/subGroups/tasks —
+// for EVERY role. Client-role users additionally filter by their clientId
+// (where('clientId','==', myClientId)), as before. The "my memberships"
+// collection-group query must filter where('uid','==', request.auth.uid).
+// ─────────────────────────────────────────────────────────────
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    // ── Membership helpers (one extra read per operation; deduped) ─────────
+    function memberPath(orgId) {
+      return /databases/$(database)/documents/orgs/$(orgId)/members/$(request.auth.uid);
+    }
+    function memberData(orgId) { return get(memberPath(orgId)).data; }
+    function isMemberOf(orgId) { return signedIn() && exists(memberPath(orgId)); }
+    function roleIn(orgId) { return memberData(orgId).role; }
+    function isManagerOf(orgId) {
+      return isMemberOf(orgId) && (roleIn(orgId) == 'admin' || roleIn(orgId) == 'pm');
+    }
+    function isContractorOf(orgId) { return isMemberOf(orgId) && roleIn(orgId) == 'contractor'; }
+    function isClientOf(orgId) { return isMemberOf(orgId) && roleIn(orgId) == 'client'; }
+    function myClientIdIn(orgId) { return memberData(orgId).get('clientId', ''); }
+
+    function validRole(role) {
+      return role in ['admin', 'pm', 'contractor', 'client'];
+    }
+    // Task status enum — must match TaskStatus in app/src/lib/types.ts.
+    function validStatus(status) {
+      return status in ['backlog', 'in_progress', 'blocked', 'revisions', 'approved', 'delivered', 'done'];
+    }
+    // orgId is required on create and immutable afterwards.
+    function hasOrgId() {
+      return request.resource.data.orgId is string && request.resource.data.orgId != '';
+    }
+    function orgIdUnchanged() {
+      return request.resource.data.orgId == resource.data.orgId;
+    }
+
+    // ── Entitlement gates (Phase 2) — usage counters vs org plan limits ─────
+    // -1 means unlimited (mirrors PLAN_LIMITS in functions/src/plans.ts).
+    // Each gate reads the target org's doc + its usage/current counter doc
+    // (get()s are deduped within a request). In a client writeBatch the app
+    // bumps the counter via FieldValue.increment in the SAME commit as the
+    // domain write; get() sees the PRE-batch counter (the "is there room
+    // before this create" check) and getAfter() sees the POST-batch counter,
+    // so requiring after == before + 1 forces every gated create to carry its
+    // paired counter increment in the same atomic commit.
+    function orgData(orgId) {
+      return get(/databases/$(database)/documents/orgs/$(orgId)).data;
+    }
+    function usageData(orgId) {
+      return get(/databases/$(database)/documents/orgs/$(orgId)/usage/current).data;
+    }
+    function usageDataAfter(orgId) {
+      return getAfter(/databases/$(database)/documents/orgs/$(orgId)/usage/current).data;
+    }
+    // The create must be batched with EXACTLY +1 on its usage counter.
+    // Residual risk (accepted): a manager could still directly decrement the
+    // counters (bounded at 0 by the usage update rule) and then create past
+    // the plan limit — the nightly reconciliation Function recounts and heals
+    // the counters. Full counter integrity would require functions-only
+    // counters (a server round-trip per create); this is a deliberate
+    // trade-off.
+    function clientCounterIncremented(orgId) {
+      return usageDataAfter(orgId).activeClients == usageData(orgId).activeClients + 1;
+    }
+    function taskCounterIncremented(orgId) {
+      return usageDataAfter(orgId).activeTasks == usageData(orgId).activeTasks + 1;
+    }
+    function underClientLimit(orgId) {
+      return orgData(orgId).clientLimit == -1
+        || usageData(orgId).activeClients < orgData(orgId).clientLimit;
+    }
+    function underTaskLimit(orgId) {
+      return orgData(orgId).taskLimit == -1
+        || usageData(orgId).activeTasks < orgData(orgId).taskLimit;
+    }
+    function underSeatLimit(orgId) {
+      return orgData(orgId).seatLimit == -1
+        || usageData(orgId).seats < orgData(orgId).seatLimit;
+    }
+
+    // Parent-task lookup for subcollections (versions/notes). Subcollection
+    // rules do NOT inherit the parent match, so task access is re-derived here
+    // — membership is checked against the PARENT task's orgId.
+    function taskData(taskId) {
+      return get(/databases/$(database)/documents/tasks/$(taskId)).data;
+    }
+    // Mirrors the tasks/{taskId} read rule: org managers/contractors see all
+    // of their org's tasks, org clients only the tasks of their own tenant
+    // that were explicitly shared with them (clientVisible; absent = hidden).
+    function hasTaskAccess(taskId) {
+      return isManagerOf(taskData(taskId).orgId)
+        || isContractorOf(taskData(taskId).orgId)
+        || (isClientOf(taskData(taskId).orgId)
+          && taskData(taskId).clientId == myClientIdIn(taskData(taskId).orgId)
+          && taskData(taskId).get('clientVisible', false) == true);
+    }
+
+    // Users: global identity ONLY ({displayName, email, createdAt}) — role and
+    // clientId live on membership docs, so there is no privilege to escalate
+    // here. Each user reads/writes their own doc; display names shown in-app
+    // come from denormalized member docs, not from users/*.
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['displayName', 'email', 'createdAt']);
+      allow delete: if false;
+    }
+
+    // NOTE: billingEvents/{eventId} (Stripe webhook idempotency markers,
+    // written by the functions API) deliberately has NO match block — it is
+    // functions-only and stays client-inaccessible via the default deny.
+    // Likewise mail/{mailId} (the firestore-send-email extension's outbox,
+    // queued by the onInviteCreated function): no match block, so clients can
+    // NEVER write mail docs — that default deny is the anti-spam property.
+
+    // Orgs: readable by members. Managers may rename; everything else on the
+    // org doc (ownerUid + the billing block: plan, limits, subscriptionStatus,
+    // stripeCustomerId/stripeSubscriptionId/currentPeriodEnd) is written ONLY
+    // via the Admin SDK (functions/seed) — updates may touch nothing but name.
+    match /orgs/{orgId} {
+      allow read: if isMemberOf(orgId);
+      allow update: if isManagerOf(orgId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 60;
+      allow create, delete: if false; // functions only
+
+      // Members: tenancy source of truth. Created/deleted only by functions
+      // (org create, invite accept, member removal — which also maintain the
+      // usage seat counter). Managers may retarget role/clientId/displayName,
+      // EXCEPT:
+      //  - the org OWNER's member doc is untouchable client-side (no demoting
+      //    the owner; ownership changes are Admin-SDK/functions territory),
+      //  - no self role changes (a pm must not promote themselves to admin) —
+      //    managers may still edit their own displayName/clientId.
+      match /members/{memberId} {
+        allow read: if isMemberOf(orgId);
+        allow update: if isManagerOf(orgId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['role', 'clientId', 'displayName'])
+          && validRole(request.resource.data.role)
+          && resource.data.uid != orgData(orgId).ownerUid
+          && !(memberId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']));
+        allow create, delete: if false; // functions only
+      }
+
+      // Usage counters {seats, activeClients, activeTasks}: members may read
+      // (the entitlement gates compare these against the org's limits).
+      // Managers may update ONLY the activeClients/activeTasks counters — the
+      // app bumps them via FieldValue.increment in the same writeBatch as a
+      // client/task create (+1, REQUIRED by the create gates via getAfter) or
+      // cascade delete (-N). Written values must be non-negative ints; beyond
+      // that, a manager could still decrement the counters (bounded at 0) and
+      // then create past the limit — the nightly reconciliation Function
+      // recounts and heals drift (accepted trade-off; full counter integrity
+      // would require functions-only counters). `seats` stays functions-only
+      // (invite accept / member removal), and the doc is created only by
+      // functions (org creation).
+      match /usage/{usageId} {
+        allow read: if isMemberOf(orgId);
+        allow update: if isManagerOf(orgId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['activeClients', 'activeTasks'])
+          && request.resource.data.activeClients is int
+          && request.resource.data.activeClients >= 0
+          && request.resource.data.activeTasks is int
+          && request.resource.data.activeTasks >= 0;
+        allow create, delete: if false; // functions initialize/own the doc
+      }
+
+      // Invites: manager-created, always born 'pending' with a lowercased
+      // email; acceptance happens through the API (functions). Managers may
+      // revoke (status → 'revoked') or delete. Seat gate: the seat limit
+      // fires at invite time (usage.seats < org.seatLimit, -1 = unlimited);
+      // the accept endpoint re-checks it server-side (409 seat_limit).
+      // Keys are deliberately NOT constrained here, so the app's optional
+      // `locale` field ('en'|'es', drives the invite-email language) — and
+      // future additive fields — pass without a rules change.
+      match /invites/{inviteId} {
+        allow read: if isManagerOf(orgId);
+        allow create: if isManagerOf(orgId)
+          && request.resource.data.status == 'pending'
+          && validRole(request.resource.data.role)
+          && request.resource.data.email == request.resource.data.email.lower()
+          && underSeatLimit(orgId);
+        allow update: if isManagerOf(orgId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+          && request.resource.data.status == 'revoked';
+        allow delete: if isManagerOf(orgId);
+      }
+    }
+
+    // Collection-group read of one's OWN membership docs — powers the app's
+    // "my memberships" query (collectionGroup('members') where uid == mine).
+    // Allow rules are additive, so this cannot widen the per-org member rules
+    // above beyond a user's own docs.
+    match /{path=**}/members/{memberId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // Clients: org managers/contractors read all of their org's clients; a
+    // client-role member reads only its own. Contractor broad read (within the
+    // org) is the same board-UI trade-off as before. Writes are manager-only;
+    // orgId is required on create and immutable afterwards. Create is
+    // entitlement-gated: denied once usage.activeClients reaches the org's
+    // clientLimit (-1 = unlimited), and it MUST be batched with the paired
+    // +1 on usage.activeClients (getAfter check) so the counter can't be
+    // skipped by a raw-SDK write.
+    match /clients/{clientId} {
+      allow read: if isManagerOf(resource.data.orgId)
+        || isContractorOf(resource.data.orgId)
+        || (isClientOf(resource.data.orgId) && clientId == myClientIdIn(resource.data.orgId));
+      allow create: if hasOrgId() && isManagerOf(request.resource.data.orgId)
+        && underClientLimit(request.resource.data.orgId)
+        && clientCounterIncremented(request.resource.data.orgId);
+      allow update: if isManagerOf(resource.data.orgId) && orgIdUnchanged();
+      allow delete: if isManagerOf(resource.data.orgId);
+    }
+
+    // Projects: client scoped by the project's clientId, within the org.
+    match /projects/{projectId} {
+      allow read: if isManagerOf(resource.data.orgId)
+        || isContractorOf(resource.data.orgId)
+        || (isClientOf(resource.data.orgId)
+          && resource.data.clientId == myClientIdIn(resource.data.orgId));
+      allow create: if hasOrgId() && isManagerOf(request.resource.data.orgId);
+      allow update: if isManagerOf(resource.data.orgId) && orgIdUnchanged();
+      allow delete: if isManagerOf(resource.data.orgId);
+    }
+
+    // Sub-groups: internal structure — org managers/contractors only.
+    match /subGroups/{subGroupId} {
+      allow read: if isManagerOf(resource.data.orgId) || isContractorOf(resource.data.orgId);
+      allow create: if hasOrgId() && isManagerOf(request.resource.data.orgId);
+      allow update: if isManagerOf(resource.data.orgId) && orgIdUnchanged();
+      allow delete: if isManagerOf(resource.data.orgId);
+    }
+
+    // Tasks: client scoped by clientId within the org, AND per-task visibility
+    // for the client role — clients only read tasks with clientVisible == true
+    // (absent = hidden), so client queries must also filter
+    // where('clientVisible','==',true). Only managers can flip the flag
+    // (non-manager updates are key-restricted to status/completedAt below).
+    // Org managers
+    // create/delete/update freely (any written status must be in the enum,
+    // orgId immutable). Non-managers may only touch status + completedAt
+    // (what updateTaskStatus in data.ts writes):
+    //   - the assigned contractor (member of the task's org) may set any
+    //     valid status EXCEPT 'approved' (approval is client-only),
+    //   - the owning client may ONLY set 'approved'.
+    // Create is entitlement-gated: denied once usage.activeTasks reaches the
+    // org's taskLimit (-1 = unlimited), and it MUST be batched with the
+    // paired +1 on usage.activeTasks (getAfter check) so the counter can't be
+    // skipped by a raw-SDK write.
+    match /tasks/{taskId} {
+      allow read: if isManagerOf(resource.data.orgId)
+        || isContractorOf(resource.data.orgId)
+        || (isClientOf(resource.data.orgId)
+          && resource.data.clientId == myClientIdIn(resource.data.orgId)
+          && resource.data.get('clientVisible', false) == true);
+      allow create: if hasOrgId() && isManagerOf(request.resource.data.orgId)
+        && validStatus(request.resource.data.status)
+        && underTaskLimit(request.resource.data.orgId)
+        && taskCounterIncremented(request.resource.data.orgId);
+      allow delete: if isManagerOf(resource.data.orgId);
+      allow update: if orgIdUnchanged()
+        && (
+          (isManagerOf(resource.data.orgId) && validStatus(request.resource.data.status))
+          || (
+            signedIn()
+            // Status transitions may also document themselves: blockedReason +
+            // blockedAt when parking a task, deliveryNote when handing off files.
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'completedAt', 'blockedReason', 'blockedAt', 'deliveryNote'])
+            && (
+              // Assigned contractor: any valid status except client-only 'approved'.
+              (request.auth.uid == resource.data.assigneeUid
+                && isContractorOf(resource.data.orgId)
+                && validStatus(request.resource.data.status)
+                && request.resource.data.status != 'approved'
+                && request.resource.data.get('blockedReason', '') is string
+                && request.resource.data.get('deliveryNote', '') is string)
+              // Owning client: approval only, only on tasks shared with them,
+              // and never touching the documentation fields.
+              || (isClientOf(resource.data.orgId)
+                && resource.data.clientId == myClientIdIn(resource.data.orgId)
+                && resource.data.get('clientVisible', false) == true
+                && request.resource.data.status == 'approved'
+                && request.resource.data.diff(resource.data).affectedKeys()
+                  .hasOnly(['status', 'completedAt']))
+            )
+          )
+        );
+
+      // Media versions: read follows task access (membership checked against
+      // the parent task's orgId); only org managers or the task's assigned
+      // contractor may write (incl. manager cascade deletes).
+      match /versions/{versionId} {
+        allow read: if hasTaskAccess(taskId);
+        allow write: if isManagerOf(taskData(taskId).orgId)
+          || (isContractorOf(taskData(taskId).orgId)
+            && taskData(taskId).assigneeUid == request.auth.uid);
+      }
+
+      // Threaded feedback: read follows task access. Creating a note requires
+      // task access, the author field matching the caller, and exactly the
+      // shape addNote in data.ts writes. Only org managers or the note's
+      // author may update/delete (resolve toggles, cascade deletes) — and a
+      // non-manager author may only touch body/resolved (what data.ts writes;
+      // authorUid/versionId/createdAt stay immutable to them).
+      match /notes/{noteId} {
+        allow read: if hasTaskAccess(taskId);
+        allow create: if hasTaskAccess(taskId)
+          && request.resource.data.authorUid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['versionId', 'authorUid', 'body', 'resolved', 'createdAt']);
+        allow update: if isManagerOf(taskData(taskId).orgId)
+          || (resource.data.authorUid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['resolved', 'body']));
+        allow delete: if isManagerOf(taskData(taskId).orgId)
+          || resource.data.authorUid == request.auth.uid;
+      }
+    }
+  }
+}

@@ -1,0 +1,67 @@
+@import 'tailwindcss';
+
+/* ════════════════════════════════════════════════════════════
+   PASDIU — Cinematic Dark theme tokens
+   Deep charcoal surfaces, stark white type, glowing accents used
+   ONLY for status/indicators. Sans-serif (Inter/Roboto) stack.
+   ════════════════════════════════════════════════════════════ */
+:root {
+  --bg: #121212;
+  --surface: #1e1e1e;
+  --surface-2: #262626;
+  --border: #333333;
+  --text: #f5f5f5;
+  --text-muted: #a3a3a3;
+  --accent-cyan: #22d3ee;   /* In-Progress */
+  --accent-emerald: #34d399; /* Approved */
+  --accent-amber: #fbbf24;   /* Revisions */
+  --status-backlog: #6b7280; /* Backlog */
+  --status-blocked: #f87171;   /* Blocked */
+  --status-delivered: #a78bfa; /* Delivered */
+  --status-done: #059669;    /* Done */
+  /* Typography: Boldonse for display/titles, B612 Mono for body text. */
+  --font-display: 'Boldonse', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-body: 'B612 Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+
+html, body, #app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+}
+
+/* Titles use the Boldonse display face. Boldonse is a heavy all-caps display
+   font with a single weight, so we normalize weight and ease the tracking that
+   several headings set for the previous sans-serif. Opt in elsewhere with
+   the `.font-display` utility. */
+h1, h2, h3, .font-display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0;
+  /* Boldonse ships a single weight — don't let the browser fake bold. */
+  font-synthesis: none;
+}
+/* Boldonse runs large for its point size — nudge line-height so titles breathe. */
+h1, h2, h3 {
+  line-height: 1.15;
+}
+
+/* Clear, visible focus states for keyboard navigation (a11y / WCAG). */
+:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Safe-area utilities ────────────────────────────────────────
+   Same markup renders correctly in the browser and inside the
+   iOS/Android shells (requires viewport-fit=cover in index.html). */
+.safe-top    { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }

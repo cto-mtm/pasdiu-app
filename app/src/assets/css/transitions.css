@@ -1,0 +1,209 @@
+/* ════════════════════════════════════════════════════════════
+   VIEW TRANSITION RECIPES
+   Rules of the house:
+   - Animate ONLY transform and opacity (compositor-friendly).
+   - Durations 200–350ms. Easing: cubic-bezier(0.4, 0, 0.2, 1).
+   - Every recipe must look acceptable if it simply cross-fades
+     (that's the automatic fallback).
+   - Page-to-page transitions are triggered ONLY by the router
+     wrapper in src/router/index.ts. This file only *tunes* them.
+   ════════════════════════════════════════════════════════════ */
+
+/* Recipe 1 — default page cross-fade (applies to everything) */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 220ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Recipe 2 — hero / shared elements: the morph is automatic; we only tune
+   timing. The universal group selector matches every element carrying a
+   view-transition-name (e.g. client-title-<id>, settings-page). */
+::view-transition-group(*) {
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Recipe 2b — worked custom per-page example (see docs/animations.md §2):
+   slide the /settings page in from the right. Any element with a unique
+   view-transition-name becomes independently targetable this way. */
+@keyframes slide-from-right {
+  from { transform: translateX(30px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+::view-transition-new(settings-page) {
+  animation: slide-from-right 260ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Recipe 3 — reduced motion: kill everything.
+   (The router also short-circuits before starting a transition; this is the
+   belt-and-braces CSS backstop.) */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   Recipe 4 — WITHIN-PAGE list animation (Vue <TransitionGroup name="list">)
+   Used by the board columns and feedback list: FLIP move + enter/leave.
+   ════════════════════════════════════════════════════════════ */
+.list-move {
+  transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.list-enter-from,
+.list-leave-to {
+  opacity: 0;
+  transform: scale(0.96);
+}
+.list-enter-active,
+.list-leave-active {
+  transition: opacity 250ms cubic-bezier(0.4, 0, 0.2, 1),
+              transform 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* Take leaving items out of flow so the move animation lands smoothly. */
+.list-leave-active {
+  position: absolute;
+}
+
+/* ════════════════════════════════════════════════════════════
+   Recipe 5 — TASK COMPLETE micro-interaction.
+   A crisp, rewarding pop when a task is checked off. Applied via a
+   class binding on the check-off control (transform/opacity only).
+   Pairs with a Tailwind `line-through` on the title.
+   ════════════════════════════════════════════════════════════ */
+@keyframes complete-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+.task-complete-glow {
+  animation: complete-pop 320ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-complete-glow {
+    animation: none;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   Recipe 6 — WITHIN-PAGE overlay (Vue <Transition name="overlay">)
+   Shared by Modal and OmniSearch: the wrapper (backdrop) fades while
+   the element carrying `.overlay-panel` pops in with a subtle scale.
+   ════════════════════════════════════════════════════════════ */
+.overlay-enter-active,
+.overlay-leave-active {
+  transition: opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.overlay-enter-from,
+.overlay-leave-to {
+  opacity: 0;
+}
+.overlay-enter-active .overlay-panel,
+.overlay-leave-active .overlay-panel {
+  transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.overlay-enter-from .overlay-panel,
+.overlay-leave-to .overlay-panel {
+  transform: scale(0.96);
+}
+@media (prefers-reduced-motion: reduce) {
+  .overlay-enter-active,
+  .overlay-leave-active,
+  .overlay-enter-active .overlay-panel,
+  .overlay-leave-active .overlay-panel {
+    transition: none;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   Recipe 7 — TOASTS (Vue <TransitionGroup name="toast">)
+   Fade + slide-up for notifications entering/leaving the stack.
+   ════════════════════════════════════════════════════════════ */
+.toast-enter-active,
+.toast-leave-active {
+  transition: opacity 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-enter-active,
+  .toast-leave-active {
+    transition: none;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   Recipe 8 — DRAWER (Vue <Transition name="drawer">)
+   Side panels (e.g. BriefDrawer): the wrapper (backdrop) fades while
+   the element carrying `.drawer-panel` slides in from the right.
+   ════════════════════════════════════════════════════════════ */
+.drawer-enter-active,
+.drawer-leave-active {
+  transition: opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.drawer-enter-from,
+.drawer-leave-to {
+  opacity: 0;
+}
+.drawer-enter-active .drawer-panel,
+.drawer-leave-active .drawer-panel {
+  transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.drawer-enter-from .drawer-panel,
+.drawer-leave-to .drawer-panel {
+  transform: translateX(100%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer-enter-active,
+  .drawer-leave-active,
+  .drawer-enter-active .drawer-panel,
+  .drawer-leave-active .drawer-panel {
+    transition: none;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   Recipe 9 — USAGE BAR fill (Settings billing card)
+   The fill is a full-width element scaled on X (transform-only, so no
+   width/layout animation); live counter updates glide to the new value.
+   ════════════════════════════════════════════════════════════ */
+.usage-fill {
+  transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .usage-fill {
+    transition: none;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   Recipe 10 — TOUR STEP (Vue <Transition name="tour-step" mode="out-in">)
+   OnboardingTour slides: the outgoing step exits left while the incoming
+   one enters from the right (out-in, so heights never overlap).
+   ════════════════════════════════════════════════════════════ */
+.tour-step-enter-active,
+.tour-step-leave-active {
+  transition: opacity 220ms cubic-bezier(0.4, 0, 0.2, 1),
+              transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.tour-step-enter-from {
+  opacity: 0;
+  transform: translateX(12px);
+}
+.tour-step-leave-to {
+  opacity: 0;
+  transform: translateX(-12px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-step-enter-active,
+  .tour-step-leave-active {
+    transition: none;
+  }
+}

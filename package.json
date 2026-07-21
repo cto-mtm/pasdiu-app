@@ -1,0 +1,20 @@
+{
+  "name": "pasdiu-monorepo",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "app",
+    "firebase/functions"
+  ],
+  "scripts": {
+    "build:shared": "npm run build -w shared",
+    "build:app": "npm run build -w app",
+    "build:functions": "npm run build -w firebase/functions",
+    "build": "npm run build:shared && npm run build:app && npm run build:functions",
+    "deploy": "node scripts/deploy.mjs",
+    "deploy:hosting": "node scripts/deploy.mjs --only hosting",
+    "deploy:functions": "node scripts/deploy.mjs --only functions",
+    "test:functions": "npm run test -w firebase/functions",
+    "test": "npm run test:functions"
+  }
+}

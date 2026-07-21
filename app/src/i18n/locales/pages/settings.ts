@@ -1,0 +1,43 @@
+const en = {
+  title: 'Settings',
+  subtitle: 'Your profile and preferences.',
+  profile: 'Profile',
+  name: 'Name',
+  email: 'Email',
+  role: 'Role',
+  workspace: 'Workspace',
+  language: 'Language',
+  signOut: 'Sign out',
+  health: 'Emulator health check',
+  healthHint: 'Calls GET /health on the Cloud Function to prove the app→API wiring works end to end.',
+  healthChecking: 'Checking…',
+  healthOk: 'Function reachable ✓',
+  healthFailed: 'Could not reach the function.',
+  leaveTitle: 'Leave workspace',
+  leaveHint: 'Remove yourself from this workspace. You lose access immediately; a manager can invite you back later.',
+  leaveCta: 'Leave workspace',
+  leaveConfirm: 'Leave {org}? You will immediately lose access to its clients, projects, and tasks.',
+}
+
+const es: typeof en = {
+  title: 'Ajustes',
+  subtitle: 'Tu perfil y preferencias.',
+  profile: 'Perfil',
+  name: 'Nombre',
+  email: 'Correo',
+  role: 'Rol',
+  workspace: 'Espacio de trabajo',
+  language: 'Idioma',
+  signOut: 'Cerrar sesión',
+  health: 'Verificación del emulador',
+  healthHint: 'Llama a GET /health en la Cloud Function para demostrar que la conexión app→API funciona de extremo a extremo.',
+  healthChecking: 'Comprobando…',
+  healthOk: 'Función accesible ✓',
+  healthFailed: 'No se pudo conectar con la función.',
+  leaveTitle: 'Salir del espacio de trabajo',
+  leaveHint: 'Elimínate de este espacio de trabajo. Perderás el acceso de inmediato; un gestor podrá invitarte de nuevo más adelante.',
+  leaveCta: 'Salir del espacio',
+  leaveConfirm: '¿Salir de {org}? Perderás de inmediato el acceso a sus clientes, proyectos y tareas.',
+}
+
+export default { en, es }

@@ -1,0 +1,11 @@
+{
+  // Typecheck-only project for `npm test` (vitest strips types via esbuild
+  // WITHOUT checking them — tsc --noEmit closes that gap). The build tsconfig
+  // stays untouched so lib/ output is unaffected.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src", "test", "vitest.config.ts"]
+}
