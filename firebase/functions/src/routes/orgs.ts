@@ -12,9 +12,57 @@ import {
 } from "../helpers/apiErrors.js";
 import { syncSeatQuantity } from "../helpers/stripeHandlers.js";
 import { reconcileOrg } from "../helpers/reconcile.js";
+import { sendInviteEmailFor } from "../helpers/inviteMail.js";
 import { PLAN_LIMITS } from "../plans.js";
 
 export const orgsRouter = express.Router();
+
+// ── Invite helpers ──────────────────────────────────────────────────────────
+
+// Invites expire server-side (preview/GET/accept all 404 past expiresAt).
+// A missing expiresAt means the invite predates expiry — still valid.
+function inviteExpired(invite: FirebaseFirestore.DocumentData): boolean {
+  const expiresAt = invite.expiresAt as { toMillis?: () => number } | undefined;
+  return typeof expiresAt?.toMillis === "function" && expiresAt.toMillis() < Date.now();
+}
+
+/** Mask an email for the public invite preview: "l•••@acme.com". */
+function maskEmail(email: string): string {
+  const at = email.indexOf("@");
+  if (at <= 0) return "•••";
+  return `${email[0]}•••${email.slice(at)}`;
+}
+
+// GET /orgs/:orgId/invites/:inviteId/preview — the ONLY unauthenticated route
+// on this router (registered before requireAuth). The signed-out invite page
+// uses it to show which workspace/role the link is for and a MASKED hint of
+// the addressed email, so recipients sign up with the right account instead
+// of discovering the mismatch after account creation. The unguessable invite
+// id is the capability token; the full email is never exposed here.
+orgsRouter.get(
+  "/:orgId/invites/:inviteId/preview",
+  asyncHandler(async (req, res) => {
+    const { orgId, inviteId } = req.params;
+    const db = getFirestore();
+    const [orgSnap, inviteSnap] = await Promise.all([
+      db.doc(`orgs/${orgId}`).get(),
+      db.doc(`orgs/${orgId}/invites/${inviteId}`).get(),
+    ]);
+    const invite = inviteSnap.data();
+    if (
+      !orgSnap.exists || !invite || invite.status !== "pending" ||
+      typeof invite.email !== "string" || inviteExpired(invite)
+    ) {
+      throw new ApiError(404, "Invite not found");
+    }
+    res.json({
+      orgName: orgSnap.get("name"),
+      role: invite.role,
+      emailHint: maskEmail(invite.email),
+    });
+  })
+);
+
 orgsRouter.use(requireAuth);
 
 // POST /orgs
@@ -141,10 +189,35 @@ orgsRouter.get(
       db.doc(`orgs/${orgId}/invites/${inviteId}`).get(),
     ]);
     const invite = inviteSnap.data();
-    if (!orgSnap.exists || !invite || invite.status !== "pending" || invite.email !== emailOf(user)) {
+    if (
+      !orgSnap.exists || !invite || invite.status !== "pending" ||
+      invite.email !== emailOf(user) || inviteExpired(invite)
+    ) {
       throw new ApiError(404, "Invite not found");
     }
     res.json({ orgName: orgSnap.get("name"), role: invite.role, email: invite.email });
+  })
+);
+
+// POST /orgs/:orgId/invites/:inviteId/resend — managers re-queue the invite
+// email. queueMail's non-merge set on the deterministic mail id wipes the
+// extension's `delivery` state, which makes firestore-send-email redeliver.
+orgsRouter.post(
+  "/:orgId/invites/:inviteId/resend",
+  asyncHandler(async (req, res) => {
+    const user = userOf(req);
+    const { orgId, inviteId } = req.params;
+    const db = getFirestore();
+    await requireManagerOf(db, orgId, user.uid);
+    const inviteSnap = await db.doc(`orgs/${orgId}/invites/${inviteId}`).get();
+    const invite = inviteSnap.data();
+    if (!invite || invite.status !== "pending" || inviteExpired(invite)) {
+      throw new ApiError(404, "Invite not found");
+    }
+    const queued = await sendInviteEmailFor(db, orgId, inviteId, invite);
+    // Only unqueued path left after the checks above: prod without APP_URL.
+    if (!queued) throw new ApiError(503, "mail_unavailable");
+    res.json({ queued: true });
   })
 );
 
@@ -169,7 +242,10 @@ orgsRouter.post(
       ]);
       if (memberSnap.exists) return; // already a member — idempotent success
       const invite = inviteSnap.data();
-      if (!orgSnap.exists || !invite || invite.status !== "pending" || invite.email !== emailOf(user)) {
+      if (
+        !orgSnap.exists || !invite || invite.status !== "pending" ||
+        invite.email !== emailOf(user) || inviteExpired(invite)
+      ) {
         throw new ApiError(404, "Invite not found");
       }
       const seatLimit = orgSnap.get("seatLimit");

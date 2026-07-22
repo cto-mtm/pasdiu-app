@@ -7,6 +7,7 @@ import { useToastStore } from '../stores/toast'
 import { useBusy } from '../composables/useBusy'
 import { useEntitlements } from '../composables/useEntitlements'
 import { track } from '../lib/analytics'
+import { resendInviteApi } from '../lib/api'
 import { ROLES } from '../lib/types'
 import type { Invite, Role } from '../lib/types'
 import { isDoneStatus } from '../lib/status'
@@ -72,15 +73,34 @@ async function saveInvite() {
   })
 }
 
-// Pending invites: copy link + revoke
+// Pending invites: copy link + resend + revoke. The link is bound to the
+// invited email (the API rejects any other account), so the copy toast says
+// so — a manager pasting it into a chat should know it isn't transferable.
 async function copyLink(inv: Invite) {
   const url = `${location.origin}/invite/${auth.activeOrgId}/${inv.id}`
   try {
     await navigator.clipboard.writeText(url)
-    toast.success(t('team.linkCopied'))
+    toast.success(t('team.linkCopied', { email: inv.email }))
   } catch {
     toast.error(t('team.copyFailed'))
   }
+}
+
+// Expired invites can't be accepted (server-side 404) — surface that state
+// instead of letting managers re-share a dead link. Legacy invites without
+// expiresAt never expire.
+function isExpired(inv: Invite): boolean {
+  return inv.expiresAt !== null && inv.expiresAt.getTime() < Date.now()
+}
+
+async function resend(inv: Invite) {
+  await run(async () => {
+    const orgId = auth.activeOrgId
+    if (!orgId) return
+    const res = await resendInviteApi(orgId, inv.id)
+    if (res.ok) toast.success(t('team.inviteResent', { email: inv.email }))
+    else toast.error(t(res.error.key, res.error.params ?? {}))
+  })
 }
 
 const revokeTarget = ref<Invite | null>(null)
@@ -162,14 +182,33 @@ onMounted(load)
             style="border-color: var(--border);"
           >
             <div class="min-w-0">
-              <p class="truncate text-sm" style="color: var(--text);">{{ inv.email }}</p>
+              <p class="truncate text-sm" style="color: var(--text);">
+                {{ inv.email }}
+                <span
+                  v-if="isExpired(inv)"
+                  class="ml-1 rounded px-1.5 py-0.5 text-xs font-medium"
+                  style="background: color-mix(in srgb, var(--accent-amber) 15%, transparent); color: var(--accent-amber);"
+                >{{ t('team.expired') }}</span>
+              </p>
               <p class="text-xs" style="color: var(--text-muted);">{{ t('roles.' + inv.role) }}</p>
             </div>
             <div class="flex shrink-0 items-center gap-2">
               <button
+                v-if="!isExpired(inv)"
+                type="button"
+                :disabled="busy"
+                class="rounded-lg px-3 py-2 text-sm transition-colors disabled:opacity-50"
+                style="color: var(--accent-cyan);"
+                @click="resend(inv)"
+              >
+                {{ t('team.resend') }}
+              </button>
+              <button
+                v-if="!isExpired(inv)"
                 type="button"
                 class="rounded-lg px-3 py-2 text-sm transition-colors"
                 style="color: var(--accent-cyan);"
+                :title="t('team.copyLinkHint', { email: inv.email })"
                 @click="copyLink(inv)"
               >
                 {{ t('team.copyLink') }}

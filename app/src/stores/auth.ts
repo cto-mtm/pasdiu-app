@@ -304,10 +304,12 @@ export const useAuthStore = defineStore('auth', () => {
 
   // Email verification gate: unverified accounts never get a session. We
   // (re)send the link and sign out; signing in again re-sends it, so no
-  // separate "resend" flow is needed.
-  async function rejectUnverified(user: User): Promise<void> {
+  // separate "resend" flow is needed. `continueUrl` (an in-app path, e.g. an
+  // invite link) becomes the verification email's continue destination so the
+  // user lands back where they started instead of losing the flow.
+  async function rejectUnverified(user: User, continueUrl?: string): Promise<void> {
     try {
-      await sendEmailVerification(user)
+      await sendEmailVerification(user, continueUrl ? { url: location.origin + continueUrl } : null)
     } catch {
       // Likely auth/too-many-requests from repeated attempts — the message
       // below still tells the user a link was sent, which remains true.
@@ -381,12 +383,17 @@ export const useAuthStore = defineStore('auth', () => {
   // Self-serve signup. Ends signed OUT behind the verification gate: the
   // account exists, the link is in their inbox, and signing in afterwards
   // walks the normal login path. Returns true when the account was created.
-  async function signup(displayName: string, email: string, password: string): Promise<boolean> {
+  async function signup(
+    displayName: string,
+    email: string,
+    password: string,
+    continueUrl?: string,
+  ): Promise<boolean> {
     error.value = null
     try {
       const cred = await createUserWithEmailAndPassword(auth, email, password)
       await fbUpdateProfile(cred.user, { displayName })
-      await rejectUnverified(cred.user) // sends the link + signs out + sets the message
+      await rejectUnverified(cred.user, continueUrl) // sends the link + signs out + sets the message
       track('signup_completed')
       return true
     } catch (e) {

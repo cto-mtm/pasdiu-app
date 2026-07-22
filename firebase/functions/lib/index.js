@@ -4197,6 +4197,12 @@ var PRICE_ENV_KEYS = {
 function appUrl() {
   return process.env.APP_URL || "http://localhost:5173";
 }
+function returnOrigin(req) {
+  if (process.env.APP_URL) return appUrl();
+  const origin = req.headers.origin;
+  if (typeof origin === "string" && origin.startsWith("https://")) return origin;
+  return appUrl();
+}
 var dynamicPriceCache = null;
 var dynamicPriceCacheTime = 0;
 var CACHE_TTL_MS = 1e3 * 60 * 15;
@@ -4511,8 +4517,8 @@ billingRouter.post(
       line_items: [{ price: await priceIdFor(plan, interval), quantity }],
       subscription_data: { metadata: { orgId, plan } },
       metadata: { orgId, plan },
-      success_url: `${appUrl()}/settings?billing=success`,
-      cancel_url: `${appUrl()}/settings?billing=cancelled`
+      success_url: `${returnOrigin(req)}/settings?billing=success`,
+      cancel_url: `${returnOrigin(req)}/settings?billing=cancelled`
     });
     res.json({ url: session.url });
   })
@@ -4534,7 +4540,7 @@ billingRouter.post(
     }
     const session = await getStripe().billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${appUrl()}/settings`
+      return_url: `${returnOrigin(req)}/settings`
     });
     res.json({ url: session.url });
   })
@@ -4638,6 +4644,50 @@ orgsRouter.post(
     });
     await batch.commit();
     res.status(201).json({ orgId: orgRef.id });
+  })
+);
+var RENAME_COOLDOWN_MS = 5e3;
+orgsRouter.patch(
+  "/:orgId",
+  asyncHandler(async (req, res) => {
+    const user = userOf(req);
+    const { orgId } = req.params;
+    const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+    if (!name || name.length > 60) {
+      throw new ApiError(400, "invalid_name");
+    }
+    const db = getFirestore4();
+    await requireManagerOf(db, orgId, user.uid);
+    const orgRef = db.doc(`orgs/${orgId}`);
+    const orgSnap = await orgRef.get();
+    if (!orgSnap.exists) throw new ApiError(404, "org_not_found");
+    const lastRenamed = orgSnap.get("renamedAt");
+    if (lastRenamed && typeof lastRenamed.toMillis === "function") {
+      const elapsed = Date.now() - lastRenamed.toMillis();
+      if (elapsed < RENAME_COOLDOWN_MS) {
+        throw new ApiError(429, "rename_cooldown");
+      }
+    }
+    const members = await orgRef.collection("members").get();
+    const BATCH_LIMIT = 499;
+    const chunks = [];
+    for (let i = 0; i < members.docs.length; i += BATCH_LIMIT) {
+      chunks.push(members.docs.slice(i, i + BATCH_LIMIT));
+    }
+    const firstBatch = db.batch();
+    firstBatch.update(orgRef, {
+      name,
+      renamedAt: FieldValue2.serverTimestamp(),
+      renamedBy: user.uid
+    });
+    for (const m of chunks[0] ?? []) firstBatch.update(m.ref, { orgName: name });
+    await firstBatch.commit();
+    for (const chunk of chunks.slice(1)) {
+      const b = db.batch();
+      for (const m of chunk) b.update(m.ref, { orgName: name });
+      await b.commit();
+    }
+    res.json({ orgId, name });
   })
 );
 orgsRouter.get(
@@ -4750,6 +4800,7 @@ var stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
 var VALID_ROUTES = [
   "GET /health",
   "POST /orgs",
+  "PATCH /orgs/:orgId",
   "GET /orgs/:orgId/invites/:inviteId",
   "POST /orgs/:orgId/invites/:inviteId/accept",
   "DELETE /orgs/:orgId/members/:uid",
@@ -4782,7 +4833,11 @@ var api = onRequest(
     region: "us-east5",
     cors: true,
     invoker: "public",
-    maxInstances: 10
+    maxInstances: 10,
+    // Secret Manager injection in prod — without this, the deployed function
+    // never sees the values and billing stays disabled. The emulator ignores
+    // it and reads functions/.env instead.
+    secrets: [stripeSecretKey, stripeWebhookSecret]
   },
   app
 );
@@ -4802,7 +4857,6 @@ var reconcileUsage = onSchedule(
 import { getFirestore as getFirestore5 } from "firebase-admin/firestore";
 import { logger as logger8 } from "firebase-functions/v2";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
-import { defineSecret as defineSecret2 } from "firebase-functions/params";
 
 // src/email/inviteEmail.ts
 var en = {
@@ -4910,7 +4964,6 @@ async function sendInviteEmailFor(db, orgId, inviteId, invite) {
 }
 
 // src/triggers/onInviteCreated.ts
-var resendApiKeySecret = defineSecret2("RESEND_API_KEY");
 var onInviteCreated = onDocumentCreated(
   {
     document: "orgs/{orgId}/invites/{inviteId}",

@@ -182,10 +182,13 @@ code never calls a mail API:
    extension watches `mail` and delivers over SMTP. `mail` has **no** rules
    match block — default deny means clients can never queue email.
 
-**Prod setup**: `firebase ext:install firebase/firestore-send-email` (or
-deploy the `extensions` block in `firebase/firebase.json`) and fill in
-`firebase/extensions/firestore-send-email.env` — an SMTP connection URI (e.g.
-Resend, SES, or Gmail), collection `mail`, and a from address.
+**Prod setup**: the extension instance is installed and configured through
+the Firebase console (SMTP connection, collection `mail`, from address; the
+SMTP password lives in the extension's SMTP_PASSWORD secret).
+`firebase/extensions/firestore-send-email.env` is reference documentation
+only — `firebase.json` deliberately has no `extensions` manifest block, so
+deploys never touch the console-managed instance. To bring it under version
+control later, run `firebase ext:export` against the prod project.
 
 **Dev**: no SMTP needed. The trigger runs whenever the functions emulator is
 up, and the queued `mail` docs are simply inspectable in the Emulator Suite UI

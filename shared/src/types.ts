@@ -86,6 +86,8 @@ export interface Invite {
   createdAt: Date | null
   invitedBy: string
   locale?: 'en' | 'es'
+  // null = no expiry (invites created before expiry existed stay valid).
+  expiresAt: Date | null
 }
 
 export type TaskStatus =

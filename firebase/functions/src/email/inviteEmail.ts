@@ -76,11 +76,31 @@ export interface RenderedEmail {
   text: string;
 }
 
+// Brand tokens — MIRROR app/src/assets/css/main.css (":root" Cinematic Dark
+// theme). Email clients can't read the app's CSS variables, so the hex values
+// are inlined here; if the theme changes, update this block in the same change.
+const BRAND = {
+  bg: "#121212", // --bg
+  surface: "#1e1e1e", // --surface
+  surface2: "#262626", // --surface-2 (BaseButton background)
+  border: "#333333", // --border
+  text: "#f5f5f5", // --text
+  textMuted: "#a3a3a3", // --text-muted
+  accentCyan: "#22d3ee", // --accent-cyan (links/indicators only, per theme)
+  // Web fonts via @import below; these stacks are the graceful fallback for
+  // clients that strip <style> (Gmail keeps <style> but drops remote fonts).
+  fontDisplay: "'Boldonse',system-ui,-apple-system,'Segoe UI',sans-serif", // --font-display
+  fontBody: "'B612 Mono',ui-monospace,'SFMono-Regular',Menlo,monospace", // --font-body
+};
+
 /**
  * Render the invite email (subject + HTML + plain-text). HTML is kept
- * email-client-safe: a single centered column, inline styles only (no
- * stylesheet, no flexbox/grid), a button-styled link with the plain URL
- * repeated underneath for clients that strip styles.
+ * email-client-safe: a single centered column, table layout, inline styles
+ * (the only <style> block is the font @import — progressive enhancement), a
+ * button-styled link with the plain URL repeated underneath for clients that
+ * strip styles. Visuals follow the app's Cinematic Dark brand (BRAND above):
+ * dark card, Boldonse display wordmark/heading, B612 Mono body, neutral
+ * BaseButton-style CTA, cyan reserved for the fallback link.
  */
 export function renderInviteEmail({ orgName, role, inviteUrl, locale }: InviteEmailInput): RenderedEmail {
   const d = dictionaryFor(locale);
@@ -101,21 +121,28 @@ export function renderInviteEmail({ orgName, role, inviteUrl, locale }: InviteEm
 
   const html = `<!DOCTYPE html>
 <html>
-  <body style="margin:0;padding:0;background-color:#f4f4f5;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5;padding:32px 16px;">
+  <head>
+    <meta charset="utf-8">
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Boldonse&family=B612+Mono&display=swap');
+    </style>
+  </head>
+  <body style="margin:0;padding:0;background-color:${BRAND.bg};">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${BRAND.bg};padding:32px 16px;">
       <tr>
         <td align="center">
-          <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background-color:#ffffff;border-radius:12px;padding:32px;font-family:Helvetica,Arial,sans-serif;text-align:left;">
+          <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background-color:${BRAND.surface};border:1px solid ${BRAND.border};border-radius:12px;padding:32px;text-align:left;">
             <tr>
               <td>
-                <h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#18181b;">${fill(d.heading, htmlVars)}</h1>
-                <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#3f3f46;">${fill(d.body, htmlVars)}</p>
+                <p style="margin:0 0 24px;font-family:${BRAND.fontDisplay};font-weight:400;font-size:15px;letter-spacing:0.04em;color:${BRAND.text};">Pasdiu</p>
+                <h1 style="margin:0 0 16px;font-family:${BRAND.fontDisplay};font-weight:400;font-size:20px;line-height:1.3;color:${BRAND.text};">${fill(d.heading, htmlVars)}</h1>
+                <p style="margin:0 0 24px;font-family:${BRAND.fontBody};font-size:14px;line-height:1.7;color:${BRAND.textMuted};">${fill(d.body, htmlVars)}</p>
                 <p style="margin:0 0 24px;">
-                  <a href="${inviteUrl}" style="display:inline-block;background-color:#0891b2;color:#ffffff;text-decoration:none;font-size:15px;font-weight:bold;padding:12px 24px;border-radius:8px;">${d.button}</a>
+                  <a href="${inviteUrl}" style="display:inline-block;background-color:${BRAND.surface2};border:1px solid ${BRAND.border};color:${BRAND.text};text-decoration:none;font-family:${BRAND.fontBody};font-size:14px;font-weight:bold;padding:12px 24px;border-radius:8px;">${d.button}</a>
                 </p>
-                <p style="margin:0 0 4px;font-size:13px;line-height:1.6;color:#71717a;">${d.linkFallback}</p>
-                <p style="margin:0 0 24px;font-size:13px;line-height:1.6;word-break:break-all;"><a href="${inviteUrl}" style="color:#0891b2;">${inviteUrl}</a></p>
-                <p style="margin:0;border-top:1px solid #e4e4e7;padding-top:16px;font-size:12px;line-height:1.6;color:#a1a1aa;">${fill(d.footer, htmlVars)}</p>
+                <p style="margin:0 0 4px;font-family:${BRAND.fontBody};font-size:12px;line-height:1.6;color:${BRAND.textMuted};">${d.linkFallback}</p>
+                <p style="margin:0 0 24px;font-family:${BRAND.fontBody};font-size:12px;line-height:1.6;word-break:break-all;"><a href="${inviteUrl}" style="color:${BRAND.accentCyan};">${inviteUrl}</a></p>
+                <p style="margin:0;border-top:1px solid ${BRAND.border};padding-top:16px;font-family:${BRAND.fontBody};font-size:12px;line-height:1.6;color:${BRAND.textMuted};">${fill(d.footer, htmlVars)}</p>
               </td>
             </tr>
           </table>

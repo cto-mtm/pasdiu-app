@@ -42,9 +42,12 @@ const SEED_PASSWORD = import.meta.env.DEV ? 'pasdiu123' : ''
 
 // Where to land after a successful sign-in: honor a ?redirect= back to an
 // invite link (set by InvitePage), otherwise the role home.
-function postLoginTarget(): string {
+function inviteRedirect(): string | undefined {
   const r = route.query.redirect
-  return typeof r === 'string' && r.startsWith('/invite') ? r : auth.homeRoute()
+  return typeof r === 'string' && r.startsWith('/invite') ? r : undefined
+}
+function postLoginTarget(): string {
+  return inviteRedirect() ?? auth.homeRoute()
 }
 
 async function submit() {
@@ -63,7 +66,9 @@ async function googleSignIn() {
 
 async function submitSignup() {
   await run(async () => {
-    const ok = await auth.signup(displayName.value.trim(), email.value, password.value)
+    // Invite flow: the verification email's continue link returns to the
+    // invite instead of dropping the user at the app root.
+    const ok = await auth.signup(displayName.value.trim(), email.value, password.value, inviteRedirect())
     if (ok) {
       // Account created; auth.error now carries the verify-email instruction —
       // flip back to login WITHOUT clearing it so the user reads it there.

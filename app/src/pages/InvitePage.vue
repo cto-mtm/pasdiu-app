@@ -7,7 +7,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import { useBusy } from '../composables/useBusy'
-import { fetchInviteApi, type ApiError, type InviteInfo } from '../lib/api'
+import {
+  fetchInviteApi,
+  fetchInvitePreviewApi,
+  type ApiError,
+  type InviteInfo,
+  type InvitePreview,
+} from '../lib/api'
 import BaseButton from '../components/BaseButton.vue'
 import BrandLogo from '../components/BrandLogo.vue'
 
@@ -33,9 +39,23 @@ const wrongAccount = computed(
     info.value.email.toLowerCase() !== auth.profile.email.toLowerCase(),
 )
 
+// Signed-out visitors get the PUBLIC preview (org, role, masked email) so
+// they know which account to sign up with BEFORE creating one. A dead invite
+// 404s (invalid state); a plain network failure keeps the generic intro —
+// don't block the sign-in path on a flaky preview.
+const preview = ref<InvitePreview | null>(null)
+const previewInvalid = ref(false)
+
 async function loadInvite() {
-  if (!auth.isAuthed) return
   loading.value = true
+  if (!auth.isAuthed) {
+    previewInvalid.value = false
+    const res = await fetchInvitePreviewApi(orgId.value, inviteId.value)
+    if (res.ok) preview.value = res.data
+    else if (res.error.params?.status === 404) previewInvalid.value = true
+    loading.value = false
+    return
+  }
   fetchError.value = null
   const res = await fetchInviteApi(orgId.value, inviteId.value)
   if (res.ok) info.value = res.data
@@ -77,13 +97,27 @@ async function switchAccount() {
       <BrandLogo class="mx-auto h-20 w-20" />
       <h1 class="font-display mt-4 text-center text-3xl tracking-tight" style="color: var(--text);">{{ t('invite.title') }}</h1>
 
-      <!-- Signed out: route through login/signup with a redirect back here. -->
+      <!-- Signed out: route through login/signup with a redirect back here.
+           The public preview names the workspace/role and hints at the
+           invited address so visitors sign up with the right account. -->
       <template v-if="!auth.isAuthed">
-        <p class="mt-3 text-center text-sm" style="color: var(--text-muted);">{{ t('invite.signedOutIntro') }}</p>
-        <div class="mt-8 space-y-3">
-          <BaseButton class="w-full" @click="goToLogin('login')">{{ t('auth.signIn') }}</BaseButton>
-          <BaseButton class="w-full" @click="goToLogin('signup')">{{ t('auth.signUp') }}</BaseButton>
-        </div>
+        <p v-if="loading" class="mt-8 text-center text-sm" style="color: var(--text-muted);">{{ t('common.loading') }}</p>
+        <p v-else-if="previewInvalid" class="mt-8 text-center text-sm" style="color: var(--accent-amber);">{{ t('invite.invalid') }}</p>
+        <template v-else>
+          <template v-if="preview">
+            <p class="mt-3 text-center text-sm" style="color: var(--text-muted);">
+              {{ t('invite.joinAs', { org: preview.orgName, role: t('roles.' + preview.role) }) }}
+            </p>
+            <p class="mt-2 text-center text-sm font-medium" style="color: var(--text);">
+              {{ t('invite.useAccountFor', { email: preview.emailHint }) }}
+            </p>
+          </template>
+          <p v-else class="mt-3 text-center text-sm" style="color: var(--text-muted);">{{ t('invite.signedOutIntro') }}</p>
+          <div class="mt-8 space-y-3">
+            <BaseButton class="w-full" @click="goToLogin('login')">{{ t('auth.signIn') }}</BaseButton>
+            <BaseButton class="w-full" @click="goToLogin('signup')">{{ t('auth.signUp') }}</BaseButton>
+          </div>
+        </template>
       </template>
 
       <p v-else-if="loading" class="mt-8 text-center text-sm" style="color: var(--text-muted);">{{ t('common.loading') }}</p>

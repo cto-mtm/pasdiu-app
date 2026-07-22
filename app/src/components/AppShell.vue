@@ -48,6 +48,18 @@ const navItems = computed(() => {
 })
 
 // Org switcher: setActiveOrg resets the data store and routes home itself.
+// Options are sorted (the collection-group query has no orderBy, so raw order
+// can drift between sessions) and duplicate workspace names get the caller's
+// role appended so two same-named agencies stay distinguishable.
+const orgOptions = computed(() => {
+  const sorted = [...auth.memberships].sort((a, b) => a.orgName.localeCompare(b.orgName))
+  const nameCount = new Map<string, number>()
+  for (const m of sorted) nameCount.set(m.orgName, (nameCount.get(m.orgName) ?? 0) + 1)
+  return sorted.map((m) => ({
+    orgId: m.orgId,
+    label: (nameCount.get(m.orgName) ?? 0) > 1 ? `${m.orgName} · ${t('roles.' + m.role)}` : m.orgName,
+  }))
+})
 function onOrgChange(orgId: string) {
   if (orgId && orgId !== auth.activeOrgId) void auth.setActiveOrg(orgId)
 }
@@ -73,13 +85,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div class="flex min-h-screen">
+  <div class="flex h-screen overflow-hidden">
     <!-- Backdrop (mobile only) -->
     <div v-if="open" class="fixed inset-0 z-30 lg:hidden" style="background: rgba(0,0,0,0.5);" @click="open = false" />
 
     <!-- Sidebar -->
     <aside
-      class="safe-top safe-bottom fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r transition-transform duration-200 motion-reduce:transition-none lg:static lg:translate-x-0"
+      class="safe-top safe-bottom fixed inset-y-0 left-0 z-40 flex h-full shrink-0 flex-col border-r transition-transform duration-200 motion-reduce:transition-none lg:static lg:translate-x-0"
       :class="[open ? 'translate-x-0' : '-translate-x-full', open ? 'lg:w-60' : 'lg:w-16']"
       style="background: var(--surface); border-color: var(--border);"
     >
@@ -99,13 +111,28 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           :aria-label="t('shell.workspaceLabel')"
           @update:model-value="onOrgChange"
         >
-          <option v-for="m in auth.memberships" :key="m.orgId" :value="m.orgId">{{ m.orgName }}</option>
+          <option v-for="o in orgOptions" :key="o.orgId" :value="o.orgId">{{ o.label }}</option>
         </BaseSelect>
         <p v-else class="truncate text-sm font-medium" style="color: var(--text);">{{ auth.activeMembership?.orgName }}</p>
       </div>
 
+      <!-- Collapsed rail: the workspace must stay identifiable — an initial
+           badge (full name in the tooltip) that expands the sidebar to switch. -->
+      <div v-else-if="auth.activeMembership" class="flex justify-center pb-3">
+        <button
+          type="button"
+          class="flex h-8 w-8 items-center justify-center rounded-lg text-sm font-semibold transition-colors"
+          style="background: var(--surface-2); color: var(--accent-cyan);"
+          :title="auth.activeMembership.orgName"
+          :aria-label="`${t('shell.workspaceLabel')}: ${auth.activeMembership.orgName}`"
+          @click="open = true"
+        >
+          {{ auth.activeMembership.orgName.slice(0, 1).toUpperCase() }}
+        </button>
+      </div>
+
       <!-- Sections -->
-      <nav class="flex-1 space-y-1 px-2 py-2">
+      <nav class="flex-1 space-y-1 overflow-y-auto px-2 py-2">
         <RouterLink
           v-for="item in navItems"
           :key="item.to"
@@ -146,7 +173,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     </aside>
 
     <!-- Main column -->
-    <div class="flex min-w-0 flex-1 flex-col">
+    <div class="flex h-full min-w-0 flex-1 flex-col overflow-y-auto">
       <!-- Slim top strip: toggle + search. Inner container matches <main> so the
            header and page content share one gutter/max-width (spacing lives here,
            not in each page). -->

@@ -5,7 +5,7 @@ import { sendInviteEmailFor } from "../helpers/inviteMail.js";
 
 // NOTE: this function needs no secrets — invite emails are queued as mail/
 // docs and delivered by the firestore-send-email extension, which holds its
-// own credentials (RESEND_API_KEY lives in the extension config, not here).
+// own SMTP credentials (extension config + its SMTP_PASSWORD secret, not here).
 
 // Invite email: when a manager creates an invite (client-side write, gated by
 // firestore.rules), render the localized email and queue it as a `mail` doc

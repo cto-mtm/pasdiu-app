@@ -1,4 +1,5 @@
 import type { Firestore } from "firebase-admin/firestore";
+import { logger } from "firebase-functions/v2";
 import { renderInviteEmail } from "../email/inviteEmail.js";
 import { appUrl } from "./stripe.js";
 import { queueMail } from "./mail.js";
@@ -33,6 +34,16 @@ export async function sendInviteEmailFor(
   if (invite.status !== "pending") return false;
   const to = typeof invite.email === "string" ? invite.email : "";
   if (!to) return false;
+
+  // Deployed Functions (K_SERVICE is Cloud Run's marker — absent in the
+  // emulator and in tests) with no APP_URL would email a dead
+  // http://localhost:5173 link (appUrl()'s dev fallback). Skip the send and
+  // log loudly instead — managers can still copy the link, and re-creating
+  // (or resending) the invite after setting APP_URL sends normally.
+  if (process.env.K_SERVICE && !process.env.APP_URL) {
+    logger.error("invite email skipped: APP_URL is not set in production", { orgId, inviteId });
+    return false;
+  }
 
   // Org name: prefer denormalized data on the invite, else read the org doc.
   let orgName = typeof invite.orgName === "string" ? invite.orgName : "";

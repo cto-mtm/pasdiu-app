@@ -16,6 +16,7 @@ import {
   addDoc,
   serverTimestamp,
   writeBatch,
+  Timestamp,
   type DocumentReference,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore'
@@ -379,6 +380,8 @@ export const useDataStore = defineStore('data', () => {
     // Inviter's current UI locale — the onInviteCreated function renders the
     // invite email in it ('en' fallback for anything unexpected).
     const locale: Invite['locale'] = i18n.global.locale.value === 'es' ? 'es' : 'en'
+    // 14-day expiry, enforced server-side (preview/accept 404 past it).
+    const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
     const ref = await guarded(() => addDoc(collection(db, 'orgs', orgId, 'invites'), {
       email,
       role: input.role,
@@ -387,10 +390,11 @@ export const useDataStore = defineStore('data', () => {
       createdAt: serverTimestamp(),
       invitedBy,
       locale,
+      expiresAt: Timestamp.fromDate(expiresAt),
     }))
     const inv: Invite = {
       id: ref.id, email, role: input.role, clientId: input.clientId,
-      status: 'pending', createdAt: new Date(), invitedBy, locale,
+      status: 'pending', createdAt: new Date(), invitedBy, locale, expiresAt,
     }
     upsert(invites.value, inv)
     return inv

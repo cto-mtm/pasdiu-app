@@ -73,6 +73,14 @@ export interface InviteInfo {
   email: string
 }
 
+// Public (unauthenticated) invite preview — the email comes back MASKED
+// (e.g. "l•••@acme.com"); the full address is only on the authed endpoint.
+export interface InvitePreview {
+  orgName: string
+  role: Role
+  emailHint: string
+}
+
 export function createOrgApi(name: string): Promise<ApiResult<{ orgId: string }>> {
   return apiFetch<{ orgId: string }>('/orgs', { method: 'POST', body: JSON.stringify({ name }) })
 }
@@ -86,6 +94,14 @@ export function renameOrgApi(orgId: string, name: string): Promise<ApiResult<{ o
 
 export function fetchInviteApi(orgId: string, inviteId: string): Promise<ApiResult<InviteInfo>> {
   return apiFetch<InviteInfo>(`/orgs/${orgId}/invites/${inviteId}`)
+}
+
+export function fetchInvitePreviewApi(orgId: string, inviteId: string): Promise<ApiResult<InvitePreview>> {
+  return apiFetch<InvitePreview>(`/orgs/${orgId}/invites/${inviteId}/preview`)
+}
+
+export function resendInviteApi(orgId: string, inviteId: string): Promise<ApiResult<{ queued: true }>> {
+  return apiFetch<{ queued: true }>(`/orgs/${orgId}/invites/${inviteId}/resend`, { method: 'POST' })
 }
 
 export function acceptInviteApi(orgId: string, inviteId: string): Promise<ApiResult<{ orgId: string }>> {

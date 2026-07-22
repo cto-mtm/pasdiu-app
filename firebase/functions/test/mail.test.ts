@@ -110,4 +110,41 @@ describe("sendInviteEmailFor (onInviteCreated's core)", () => {
     expect(all.size).toBe(1); // one doc, not two sends
     expect(all.docs[0].id).toBe(`invite-${ORG}-inv-mail-twice`);
   });
+
+  it("resend wipes the extension's delivery state so it redelivers", async () => {
+    // The resend endpoint re-runs sendInviteEmailFor; the non-merge set must
+    // drop the `delivery` field firestore-send-email stamps after processing —
+    // that absence is what makes the extension treat the doc as new mail.
+    await seedInvite(ORG, "inv-mail-rs", { email: "mail-rs@test.dev" });
+    expect(await runFor("inv-mail-rs")).toBe(true);
+    await getFirestore()
+      .doc(`mail/invite-${ORG}-inv-mail-rs`)
+      .update({ delivery: { state: "SUCCESS", attempts: 1 } });
+
+    expect(await runFor("inv-mail-rs")).toBe(true);
+    const snap = await mailSnap("inv-mail-rs");
+    expect(snap.get("delivery")).toBeUndefined();
+    expect(snap.get("to")).toEqual(["mail-rs@test.dev"]);
+  });
+
+  it("skips (and does not queue) in deployed prod when APP_URL is unset", async () => {
+    // K_SERVICE marks deployed Cloud Run/Functions; without APP_URL the link
+    // would be the dev fallback http://localhost:5173 — a dead link for real
+    // recipients, so the send is skipped with an error log instead.
+    await seedInvite(ORG, "inv-mail-noapp", { email: "mail-noapp@test.dev" });
+    process.env.K_SERVICE = "api";
+    try {
+      expect(await runFor("inv-mail-noapp")).toBe(false);
+      expect((await mailSnap("inv-mail-noapp")).exists).toBe(false);
+
+      // With APP_URL configured the same invite sends.
+      process.env.APP_URL = "https://app.example.com";
+      expect(await runFor("inv-mail-noapp")).toBe(true);
+      const message = (await mailSnap("inv-mail-noapp")).get("message") as MailMessage;
+      expect(message.html).toContain(`https://app.example.com/invite/${ORG}/inv-mail-noapp`);
+    } finally {
+      delete process.env.K_SERVICE;
+      delete process.env.APP_URL;
+    }
+  });
 });

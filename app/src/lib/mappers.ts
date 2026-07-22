@@ -141,6 +141,7 @@ export function mapInvite(id: string, d: Record<string, unknown>): Invite {
     createdAt: toDate(d.createdAt),
     invitedBy: d.invitedBy as string,
     locale: d.locale as Invite['locale'],
+    expiresAt: toDate(d.expiresAt), // null = legacy invite without expiry
   }
 }
 

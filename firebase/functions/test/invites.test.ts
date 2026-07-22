@@ -1,4 +1,5 @@
-// GET /orgs/:orgId/invites/:inviteId (preview) and POST .../accept.
+// GET /orgs/:orgId/invites/:inviteId (authed), the public .../preview,
+// POST .../accept, and POST .../resend.
 // The invite is addressed to an email; the caller's token email must match.
 import { describe, it, expect, beforeEach } from "vitest";
 import { getFirestore } from "firebase-admin/firestore";
@@ -12,14 +13,62 @@ import {
   seedOrg,
   seedUsage,
   seedInvite,
+  seedMember,
 } from "./helpers.js";
 
 const ORG = "org-a";
+
+const IN_AN_HOUR = () => new Date(Date.now() + 60 * 60 * 1000);
+const AN_HOUR_AGO = () => new Date(Date.now() - 60 * 60 * 1000);
 
 beforeEach(async () => {
   await clearFirestore();
   await seedOrg(ORG);
   await seedUsage(ORG, { seats: 1 }); // the owner's seat
+});
+
+describe("GET /orgs/:orgId/invites/:inviteId/preview (public)", () => {
+  it("returns org name, role, and a MASKED email with no auth", async () => {
+    await seedInvite(ORG, "inv-prev", { email: "invitee@test.dev", role: "client" });
+    const res = await getAnon(`/orgs/${ORG}/invites/inv-prev/preview`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      orgName: `Org ${ORG}`,
+      role: "client",
+      emailHint: "i•••@test.dev",
+    });
+    // The full address must never leak through the public endpoint.
+    expect(JSON.stringify(res.body)).not.toContain("invitee@test.dev");
+  });
+
+  it("404s for a nonexistent invite", async () => {
+    const res = await getAnon(`/orgs/${ORG}/invites/inv-nope/preview`);
+    expect(res.status).toBe(404);
+  });
+
+  it("404s for a revoked invite", async () => {
+    await seedInvite(ORG, "inv-prev-rev", { status: "revoked" });
+    const res = await getAnon(`/orgs/${ORG}/invites/inv-prev-rev/preview`);
+    expect(res.status).toBe(404);
+  });
+
+  it("404s for an accepted invite", async () => {
+    await seedInvite(ORG, "inv-prev-acc", { status: "accepted" });
+    const res = await getAnon(`/orgs/${ORG}/invites/inv-prev-acc/preview`);
+    expect(res.status).toBe(404);
+  });
+
+  it("404s for an expired invite", async () => {
+    await seedInvite(ORG, "inv-prev-exp", { expiresAt: AN_HOUR_AGO() });
+    const res = await getAnon(`/orgs/${ORG}/invites/inv-prev-exp/preview`);
+    expect(res.status).toBe(404);
+  });
+
+  it("200s for an unexpired invite with a future expiresAt", async () => {
+    await seedInvite(ORG, "inv-prev-fresh", { expiresAt: IN_AN_HOUR() });
+    const res = await getAnon(`/orgs/${ORG}/invites/inv-prev-fresh/preview`);
+    expect(res.status).toBe(200);
+  });
 });
 
 describe("GET /orgs/:orgId/invites/:inviteId (preview)", () => {
@@ -61,6 +110,13 @@ describe("GET /orgs/:orgId/invites/:inviteId (preview)", () => {
     const res = await get(`/orgs/${ORG}/invites/inv-ok`, token);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ orgName: `Org ${ORG}`, role: "pm", email: "inv-ok@test.dev" });
+  });
+
+  it("404s for an expired invite even for the addressed caller", async () => {
+    await seedInvite(ORG, "inv-old", { email: "inv-old@test.dev", expiresAt: AN_HOUR_AGO() });
+    const token = await makeUserToken({ uid: "u-inv-old", email: "inv-old@test.dev" });
+    const res = await get(`/orgs/${ORG}/invites/inv-old`, token);
+    expect(res.status).toBe(404);
   });
 });
 
@@ -147,6 +203,24 @@ describe("POST /orgs/:orgId/invites/:inviteId/accept", () => {
     expect(member.exists).toBe(false);
   });
 
+  it("404s when accepting an expired invite (member not created)", async () => {
+    await seedInvite(ORG, "inv-exp", { email: "inv-exp@test.dev", expiresAt: AN_HOUR_AGO() });
+    const token = await makeUserToken({ uid: "u-inv-exp", email: "inv-exp@test.dev" });
+    const res = await post(`/orgs/${ORG}/invites/inv-exp/accept`, token);
+    expect(res.status).toBe(404);
+    const member = await getFirestore().doc(`orgs/${ORG}/members/u-inv-exp`).get();
+    expect(member.exists).toBe(false);
+  });
+
+  it("accepts an unexpired invite with a future expiresAt", async () => {
+    // Legacy invites WITHOUT expiresAt are covered by every other accept test
+    // (seedInvite's default shape has no expiry) — this is the future-dated leg.
+    await seedInvite(ORG, "inv-fresh", { email: "inv-fresh@test.dev", expiresAt: IN_AN_HOUR() });
+    const token = await makeUserToken({ uid: "u-inv-fresh", email: "inv-fresh@test.dev" });
+    const res = await post(`/orgs/${ORG}/invites/inv-fresh/accept`, token);
+    expect(res.status).toBe(200);
+  });
+
   it("stores invitedBy: null when the invite doc lacks invitedBy (regression)", async () => {
     // A fixed bug: Firestore rejects `undefined`, so an invite written without
     // invitedBy must not 500 the whole accept.
@@ -160,5 +234,49 @@ describe("POST /orgs/:orgId/invites/:inviteId/accept", () => {
     expect(member.exists).toBe(true);
     expect(member.get("invitedBy")).toBeNull();
     expect(member.get("clientId")).toBeUndefined(); // no clientId on the invite
+  });
+});
+
+describe("POST /orgs/:orgId/invites/:inviteId/resend", () => {
+  it("rejects requests without a token (401)", async () => {
+    const res = await postAnon(`/orgs/${ORG}/invites/inv-x/resend`);
+    expect(res.status).toBe(401);
+  });
+
+  it("403s for a non-manager member", async () => {
+    await seedMember(ORG, "u-editor", "contractor");
+    await seedInvite(ORG, "inv-rs-403");
+    const token = await makeUserToken({ uid: "u-editor", email: "u-editor@test.dev" });
+    const res = await post(`/orgs/${ORG}/invites/inv-rs-403/resend`, token);
+    expect(res.status).toBe(403);
+  });
+
+  it("404s for a revoked invite", async () => {
+    await seedMember(ORG, "u-mgr", "admin");
+    await seedInvite(ORG, "inv-rs-rev", { status: "revoked" });
+    const token = await makeUserToken({ uid: "u-mgr", email: "u-mgr@test.dev" });
+    const res = await post(`/orgs/${ORG}/invites/inv-rs-rev/resend`, token);
+    expect(res.status).toBe(404);
+  });
+
+  it("404s for an expired invite", async () => {
+    await seedMember(ORG, "u-mgr2", "admin");
+    await seedInvite(ORG, "inv-rs-exp", { expiresAt: new Date(Date.now() - 1000) });
+    const token = await makeUserToken({ uid: "u-mgr2", email: "u-mgr2@test.dev" });
+    const res = await post(`/orgs/${ORG}/invites/inv-rs-exp/resend`, token);
+    expect(res.status).toBe(404);
+  });
+
+  it("re-queues the mail doc for a manager (200)", async () => {
+    await seedMember(ORG, "u-mgr3", "pm"); // pm counts as manager
+    await seedInvite(ORG, "inv-rs-ok", { email: "rs-ok@test.dev" });
+    const token = await makeUserToken({ uid: "u-mgr3", email: "u-mgr3@test.dev" });
+    const res = await post(`/orgs/${ORG}/invites/inv-rs-ok/resend`, token);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ queued: true });
+
+    const mail = await getFirestore().doc(`mail/invite-${ORG}-inv-rs-ok`).get();
+    expect(mail.exists).toBe(true);
+    expect(mail.get("to")).toEqual(["rs-ok@test.dev"]);
   });
 });
