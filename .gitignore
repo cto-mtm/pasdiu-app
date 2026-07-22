@@ -8,6 +8,8 @@ firebase-debug*.log*
 firebase/.firebase/
 # Deploy staging: app/dist/ is copied here by scripts/deploy.sh — never commit it.
 firebase/app/
+# Compiled Cloud Functions output
+firebase/functions/lib/
 
 # Dependencies
 node_modules/
