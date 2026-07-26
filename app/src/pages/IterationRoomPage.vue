@@ -6,7 +6,7 @@ import { useDataStore } from '../stores/data'
 import { useAuthStore } from '../stores/auth'
 import { useBusy } from '../composables/useBusy'
 import { sanitizeExternalUrl } from '../lib/url'
-import type { Version, Note, MetaField } from '../lib/types'
+import type { Deliverable, Version, Note, MetaField } from '../lib/types'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import BriefDrawer from '../components/BriefDrawer.vue'
@@ -148,6 +148,17 @@ async function toggleResolve(n: Note) {
 
 const loadError = ref(false)
 const loaded = ref(false)
+const parentDeliverable = ref<Deliverable | undefined>()
+
+// Stage context: if this task belongs to a deliverable, show which stage it is.
+const stageContext = computed(() => {
+  if (!task.value || !task.value.deliverableId || !parentDeliverable.value) return null
+  const del = parentDeliverable.value
+  const stageIndex = del.stages.findIndex((s) => s.id === task.value!.stageId)
+  if (stageIndex === -1) return null
+  return { index: stageIndex, total: del.stages.length, name: del.stages[stageIndex].name, deliverableId: del.id, deliverableName: del.name }
+})
+
 async function load() {
   loadError.value = false
   try {
@@ -159,6 +170,17 @@ async function load() {
       versions.value = await data.loadVersions(taskId.value)
       selectedVersionId.value = versions.value.at(-1)?.id ?? null
       await refreshNotes()
+
+      // Load parent deliverable for stage context.
+      if (tk.deliverableId) {
+        const { getDoc, doc: docRef } = await import('firebase/firestore')
+        const { db: fireDb } = await import('../lib/firebase')
+        const { mapDeliverable } = await import('../lib/mappers')
+        const delSnap = await getDoc(docRef(fireDb, 'deliverables', tk.deliverableId))
+        if (delSnap.exists()) {
+          parentDeliverable.value = mapDeliverable(delSnap.id, delSnap.data())
+        }
+      }
     }
     loaded.value = true
   } catch {
@@ -194,6 +216,15 @@ onMounted(load)
         <p v-else-if="task.status === 'delivered' && task.deliveryNote" class="mt-2 text-sm" style="color: var(--text-muted);">
           {{ t('board.deliveryNoteLabel') }}: {{ task.deliveryNote }}
         </p>
+        <!-- Stage context when task belongs to a deliverable -->
+        <div v-if="stageContext" class="mt-2 flex items-center gap-2 text-sm" style="color: var(--text-muted);">
+          <span class="rounded bg-[color:var(--surface-2)] px-2 py-0.5 text-xs font-medium">
+            {{ t('deliverableDetail.stageContext', { n: stageContext.index + 1, total: stageContext.total }) }}
+          </span>
+          <RouterLink :to="{ name: 'deliverable', params: { deliverableId: stageContext.deliverableId } }" class="text-xs underline" style="color: var(--accent-cyan);">
+            {{ t('deliverableDetail.viewDeliverable') }} — {{ stageContext.deliverableName }}
+          </RouterLink>
+        </div>
       </div>
       <div class="flex items-center gap-2">
         <!-- Brief is viewable by everyone with task access (managers, editors, clients). -->

@@ -10,6 +10,7 @@ import meta from './locales/configs/meta'
 import shell from './locales/components/shell'
 import search from './locales/components/search'
 import brief from './locales/components/brief'
+import batchCreate from './locales/components/batchCreate'
 // `import` is a reserved word — alias the binding, keep the registered key.
 import importMessages from './locales/components/import'
 import tour from './locales/components/tour'
@@ -19,6 +20,7 @@ import invite from './locales/pages/invite'
 import dashboard from './locales/pages/dashboard'
 import client from './locales/pages/client'
 import board from './locales/pages/board'
+import deliverable from './locales/pages/deliverable'
 import iteration from './locales/pages/iteration'
 import slate from './locales/pages/slate'
 import portal from './locales/pages/portal'
@@ -45,6 +47,7 @@ const messages = {
     shell: shell.en,
     search: search.en,
     brief: brief.en,
+    batchCreate: batchCreate.en,
     import: importMessages.en,
     tour: tour.en,
     auth: auth.en,
@@ -53,6 +56,7 @@ const messages = {
     dashboard: dashboard.en,
     client: client.en,
     board: board.en,
+    deliverableDetail: deliverable.en,
     iteration: iteration.en,
     slate: slate.en,
     portal: portal.en,
@@ -74,6 +78,7 @@ const messages = {
     shell: shell.es,
     search: search.es,
     brief: brief.es,
+    batchCreate: batchCreate.es,
     import: importMessages.es,
     tour: tour.es,
     auth: auth.es,
@@ -82,6 +87,7 @@ const messages = {
     dashboard: dashboard.es,
     client: client.es,
     board: board.es,
+    deliverableDetail: deliverable.es,
     iteration: iteration.es,
     slate: slate.es,
     portal: portal.es,

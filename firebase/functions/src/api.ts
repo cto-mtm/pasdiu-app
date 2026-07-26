@@ -6,6 +6,7 @@ import { applyCors } from "./helpers/cors.js";
 import { healthRouter } from "./routes/health.js";
 import { billingRouter, billingWebhookHandler } from "./routes/billing.js";
 import { orgsRouter } from "./routes/orgs.js";
+import { deliverablesRouter } from "./routes/deliverables.js";
 
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
@@ -20,6 +21,7 @@ const VALID_ROUTES = [
   "POST /orgs/:orgId/invites/:inviteId/resend",
   "DELETE /orgs/:orgId/members/:uid",
   "POST /orgs/:orgId/reconcile",
+  "POST /orgs/:orgId/deliverables/batch",
   "GET /billing/config",
   "POST /billing/checkout",
   "POST /billing/portal",
@@ -48,6 +50,7 @@ app.use(express.json());
 app.use("/health", healthRouter);
 app.use("/billing", billingRouter);
 app.use("/orgs", orgsRouter);
+app.use("/orgs", deliverablesRouter);
 
 // ── 404 ─────────────────────────────────────────────────────────────────────
 app.use((req, res) => {

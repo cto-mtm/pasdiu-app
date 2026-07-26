@@ -39,13 +39,19 @@ export const DeliverableTypeInputSchema = z.object({
 
 export const BatchCreateDeliverableSchema = z.object({
   projectId: z.string().min(1),
-  subGroupId: z.string().min(1),
+  subGroupId: z.string().min(1).optional(),
+  subGroupName: z.string().min(1).max(60).optional(),
   typeId: z.string().min(1),
   names: z.array(z.string().min(1).max(120)).min(1).max(200),
-  assigneeUid: z.string().optional(),
+  stageAssignees: z.record(z.string(), z.array(z.string().min(1))).optional(),
   clientVisible: z.boolean().optional(),
   skipStageIds: z.array(z.string()).optional(),
-})
+  dueStartAt: z.string().optional(),
+  dueEndAt: z.string().optional(),
+}).refine(
+  (d) => d.subGroupId || d.subGroupName,
+  { message: 'Either subGroupId or subGroupName is required' }
+)
 
 export type CreateOrgInput = z.infer<typeof CreateOrgSchema>
 export type InviteUserInput = z.infer<typeof InviteUserSchema>

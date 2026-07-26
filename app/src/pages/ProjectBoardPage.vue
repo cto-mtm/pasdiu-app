@@ -24,6 +24,7 @@ import OverflowMenu from '../components/OverflowMenu.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import MetaEditor from '../components/MetaEditor.vue'
 import UpsellModal from '../components/UpsellModal.vue'
+import BatchCreateWizard from '../components/BatchCreateWizard.vue'
 import type { MetaField } from '../lib/types'
 
 const { t } = useI18n()
@@ -84,6 +85,7 @@ const showSub = ref(false)
 const subName = ref('')
 const showTask = ref(false)
 const showTaskUpsell = ref(false)
+const showBatchWizard = ref(false)
 const taskTitle = ref('')
 const taskDesc = ref('')
 const taskSub = ref('')
@@ -281,6 +283,9 @@ onMounted(load)
           >
             + {{ t('actions.newSubGroup') }}
           </button>
+          <BaseButton class="shrink-0 whitespace-nowrap" @click="showBatchWizard = true">
+            + {{ t('batchCreate.title') }}
+          </BaseButton>
           <BaseButton class="shrink-0 whitespace-nowrap" :disabled="!subGroups.length" @click="openTaskModal">
             + {{ t('actions.newTask') }}
           </BaseButton>
@@ -498,6 +503,13 @@ onMounted(load)
     />
 
     <UpsellModal :open="showTaskUpsell" reason="tasks" @close="showTaskUpsell = false" />
+
+    <BatchCreateWizard
+      :open="showBatchWizard"
+      :project-id="projectId"
+      @close="showBatchWizard = false"
+      @created="showBatchWizard = false"
+    />
   </section>
 
   <section v-else-if="loadError">

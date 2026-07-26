@@ -75,6 +75,8 @@ export const useDataStore = defineStore('data', () => {
   // Memo guards for the full-collection loads (cleared by reset()).
   let usersLoaded = false
   let clientsLoaded = false
+  let projectsLoaded = false
+  let tasksLoaded = false
 
   // Pagination cursors for the full-collection loads (cleared by reset()).
   let tasksCursor: QueryDocumentSnapshot | null = null
@@ -108,6 +110,8 @@ export const useDataStore = defineStore('data', () => {
     invites.value = []
     usersLoaded = false
     clientsLoaded = false
+    projectsLoaded = false
+    tasksLoaded = false
     tasksCursor = null
     projectsCursor = null
     tasksMayHaveMore.value = false
@@ -180,6 +184,7 @@ export const useDataStore = defineStore('data', () => {
   // First page REPLACES state so remotely deleted docs don't ghost;
   // loadMoreProjects appends from the cursor.
   async function loadAllProjects(): Promise<void> {
+    if (projectsLoaded) return
     const orgId = requireOrgId()
     const snap = await getDocs(query(
       collection(db, 'projects'),
@@ -190,6 +195,7 @@ export const useDataStore = defineStore('data', () => {
     projects.value = snap.docs.map((d) => mapProject(d.id, d.data()))
     projectsCursor = snap.docs[snap.docs.length - 1] ?? null
     projectsMayHaveMore.value = snap.docs.length === PAGE_SIZE
+    projectsLoaded = true
   }
   async function loadMoreProjects(): Promise<void> {
     if (!projectsMayHaveMore.value || !projectsCursor) return
@@ -265,6 +271,7 @@ export const useDataStore = defineStore('data', () => {
   // First page REPLACES state so remotely deleted docs don't ghost;
   // loadMoreTasks appends from the cursor.
   async function loadAllTasks(): Promise<void> {
+    if (tasksLoaded) return
     const orgId = requireOrgId()
     const snap = await getDocs(query(
       collection(db, 'tasks'),
@@ -275,6 +282,7 @@ export const useDataStore = defineStore('data', () => {
     tasks.value = snap.docs.map((d) => mapTask(d.id, d.data()))
     tasksCursor = snap.docs[snap.docs.length - 1] ?? null
     tasksMayHaveMore.value = snap.docs.length === PAGE_SIZE
+    tasksLoaded = true
   }
   async function loadMoreTasks(): Promise<void> {
     if (!tasksMayHaveMore.value || !tasksCursor) return
