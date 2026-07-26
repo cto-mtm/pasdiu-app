@@ -41,7 +41,7 @@ export const BatchCreateDeliverableSchema = z.object({
   projectId: z.string().min(1),
   subGroupId: z.string().min(1).optional(),
   subGroupName: z.string().min(1).max(60).optional(),
-  typeId: z.string().min(1),
+  typeId: z.string().optional(),
   names: z.array(z.string().min(1).max(120)).min(1).max(200),
   stageAssignees: z.record(z.string(), z.array(z.string().min(1))).optional(),
   clientVisible: z.boolean().optional(),

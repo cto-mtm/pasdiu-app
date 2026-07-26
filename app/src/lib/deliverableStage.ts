@@ -23,13 +23,21 @@ export interface CurrentStageResult {
  * Derive the current stage of a deliverable from its tasks.
  * Call this in detail views where the deliverable's tasks are already loaded.
  * List views should use `stageSummary` instead (the trigger-maintained cache).
+ *
+ * Skipped stages: if a stage is optional and has no task, it is treated as
+ * skipped (not current). If a required stage has no task, it IS current
+ * (awaiting instantiation). This matches phase 2a's decision to not create
+ * tasks for skipped optional stages.
  */
 export function currentStage(deliverable: Deliverable, tasks: Task[]): CurrentStageResult {
   for (let i = 0; i < deliverable.stages.length; i++) {
     const stage = deliverable.stages[i]
     const task = tasks.find((t) => t.stageId === stage.id)
-    // No task for this stage → it's the current one (not yet instantiated or skipped)
+    // No task for this stage:
+    //   - optional stage → skipped, continue to next
+    //   - required stage → this is the current one (not yet instantiated)
     if (!task) {
+      if (stage.optional) continue
       return { stage, index: i, complete: false }
     }
     // Task exists but is not terminal → this stage is active
@@ -37,6 +45,6 @@ export function currentStage(deliverable: Deliverable, tasks: Task[]): CurrentSt
       return { stage, index: i, complete: false }
     }
   }
-  // All stages have terminal tasks → deliverable is complete
+  // All stages have terminal tasks (or were optional-skipped) → complete
   return { stage: undefined, index: -1, complete: true }
 }

@@ -123,7 +123,7 @@ deliverablesRouter.post(
           projectId: input.projectId,
           subGroupId,
           subGroupName,
-          typeId: input.typeId,
+          typeId: input.typeId ?? "",
           stages: pipeline.stages, // full snapshot
           stageSummary: [], // trigger will fill on first task write
           name: input.names[i],

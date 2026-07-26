@@ -149,6 +149,7 @@ async function toggleResolve(n: Note) {
 const loadError = ref(false)
 const loaded = ref(false)
 const parentDeliverable = ref<Deliverable | undefined>()
+const previousStageNote = ref('')
 
 // Stage context: if this task belongs to a deliverable, show which stage it is.
 const stageContext = computed(() => {
@@ -175,10 +176,27 @@ async function load() {
       if (tk.deliverableId) {
         const { getDoc, doc: docRef } = await import('firebase/firestore')
         const { db: fireDb } = await import('../lib/firebase')
-        const { mapDeliverable } = await import('../lib/mappers')
+        const { mapDeliverable, mapTask: mapT } = await import('../lib/mappers')
         const delSnap = await getDoc(docRef(fireDb, 'deliverables', tk.deliverableId))
         if (delSnap.exists()) {
           parentDeliverable.value = mapDeliverable(delSnap.id, delSnap.data())
+
+          // Find previous stage's handoff note (deliveryNote on the prior task).
+          const del = parentDeliverable.value
+          const stageIndex = del.stages.findIndex((s) => s.id === tk.stageId)
+          if (stageIndex > 0) {
+            const prevStageId = del.stages[stageIndex - 1].id
+            const { getDocs: gd, query: q, collection: col, where: w } = await import('firebase/firestore')
+            const prevSnap = await gd(q(
+              col(fireDb, 'tasks'),
+              w('deliverableId', '==', tk.deliverableId),
+              w('stageId', '==', prevStageId),
+            ))
+            if (!prevSnap.empty) {
+              const prevTask = prevSnap.docs[0].data()
+              previousStageNote.value = (prevTask.deliveryNote as string) ?? ''
+            }
+          }
         }
       }
     }
@@ -225,6 +243,10 @@ onMounted(load)
             {{ t('deliverableDetail.viewDeliverable') }} — {{ stageContext.deliverableName }}
           </RouterLink>
         </div>
+        <p v-if="stageContext && previousStageNote" class="mt-2 rounded-lg border p-2 text-sm" style="background: var(--surface-2); border-color: var(--border); color: var(--text);">
+          <span class="text-xs font-medium" style="color: var(--text-muted);">{{ t('deliverableDetail.handoffNote', { stage: parentDeliverable?.stages[stageContext.index - 1]?.name ?? '' }) }}</span><br>
+          {{ previousStageNote }}
+        </p>
       </div>
       <div class="flex items-center gap-2">
         <!-- Brief is viewable by everyone with task access (managers, editors, clients). -->

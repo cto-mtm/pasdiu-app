@@ -58,10 +58,8 @@ const teamMembers = computed(() => data.teamMembers)
 
 // Pipeline stages from org (loaded via the org doc in the store).
 const pipeline = computed<WorkflowStage[]>(() => {
-  // The org pipeline is on the org doc; access via store if available.
-  // For now, use the org reactive state if exposed, or fall back to empty.
-  const org = auth.activeOrg
-  return (org as unknown as { pipeline?: { stages: WorkflowStage[] } })?.pipeline?.stages ?? []
+  const orgDoc = auth.org
+  return orgDoc?.pipeline?.stages ?? []
 })
 
 // Deliverable types (would need to be loaded — for now placeholder).
