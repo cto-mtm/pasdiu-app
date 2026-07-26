@@ -35,10 +35,11 @@ covered by the manual Stripe-CLI flow in the README instead.
   (real Auth-emulator user + REST sign-in for a real ID token; also upserts
   the `users/{uid}` identity doc, mirroring the production invariant),
   `clearFirestore`, seed factories (`seedOrg`, `seedMember`, `seedUsage`,
-  `seedInvite`, `seedClient`, `seedTask` — complete production-shaped docs,
-  `over` spread last), `stripeEnv` (save/set/restore), `stripeSignature`,
-  `pollUntil`, `containsKeyDeep`. Tests never hand-write Firestore docs or
-  requests outside these helpers.
+  `seedInvite`, `seedClient`, `seedTask`, `seedDeliverable`,
+  `seedDeliverableType` — complete production-shaped docs, `over` spread
+  last), `stripeEnv` (save/set/restore), `stripeSignature`, `pollUntil`,
+  `containsKeyDeep`. Tests never hand-write Firestore docs or requests
+  outside these helpers.
 
 ### Running
 

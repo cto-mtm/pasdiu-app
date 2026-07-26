@@ -5,8 +5,6 @@ import {
   ApiError,
   asyncHandler,
   userOf,
-  displayNameOf,
-  requireManagerOf,
   MANAGER_ROLES,
 } from "../helpers/apiErrors.js";
 
@@ -33,19 +31,44 @@ async function getMemberRole(db: FirebaseFirestore.Firestore, orgId: string, uid
   };
 }
 
-// Advance the approval-stage task to 'approved' status.
-async function advanceApprovalTask(db: FirebaseFirestore.Firestore, deliverableId: string) {
-  // Find the approval-stage task (clientFacing + last non-terminal).
-  const tasksSnap = await db.collection("tasks")
-    .where("deliverableId", "==", deliverableId)
-    .get();
+// Terminal statuses — a task in any of these states is "done" for stage purposes.
+const TERMINAL_STATUSES = new Set(["approved", "done", "delivered"]);
+
+function isTerminal(status: string): boolean {
+  return TERMINAL_STATUSES.has(status);
+}
+
+// Find the current non-terminal task for a deliverable (the first task whose
+// status is not terminal, ordered by stage position from the deliverable).
+async function findCurrentTask(db: FirebaseFirestore.Firestore, deliverableId: string) {
+  const [delSnap, tasksSnap] = await Promise.all([
+    db.doc(`deliverables/${deliverableId}`).get(),
+    db.collection("tasks").where("deliverableId", "==", deliverableId).get(),
+  ]);
+
+  if (!delSnap.exists) return null;
+  const stages = (delSnap.data()!.stages ?? []) as Array<{ id: string }>;
+  const tasksByStageId = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
   for (const doc of tasksSnap.docs) {
-    const task = doc.data();
-    if (task.status !== "approved" && task.status !== "done" && task.status !== "delivered") {
-      // Find the stage — if it's clientFacing, advance it.
-      await doc.ref.update({ status: "approved", completedAt: FieldValue.serverTimestamp() });
-      break; // advance only the current stage
+    const stageId = doc.get("stageId") as string;
+    if (stageId) tasksByStageId.set(stageId, doc);
+  }
+
+  // Walk stages in order, find the first non-terminal task.
+  for (const stage of stages) {
+    const taskDoc = tasksByStageId.get(stage.id);
+    if (taskDoc && !isTerminal(taskDoc.get("status") as string)) {
+      return taskDoc;
     }
+  }
+  return null;
+}
+
+// Advance the current stage task to 'approved' status.
+async function advanceApprovalTask(db: FirebaseFirestore.Firestore, deliverableId: string) {
+  const taskDoc = await findCurrentTask(db, deliverableId);
+  if (taskDoc) {
+    await taskDoc.ref.update({ status: "approved", completedAt: FieldValue.serverTimestamp() });
   }
 }
 
@@ -112,23 +135,12 @@ approvalRouter.post(
 
     const note = typeof req.body?.note === "string" ? req.body.note.trim() : "";
 
-    // Set the current stage task to 'revisions' and attach the note.
-    const tasksSnap = await db.collection("tasks")
-      .where("deliverableId", "==", deliverableId)
-      .get();
-
+    // Set the current stage task to 'revisions'.
     let revisionedTaskId = "";
-    for (const doc of tasksSnap.docs) {
-      const task = doc.data();
-      // Find the current non-terminal task and set it to revisions.
-      if (task.status !== "approved" && task.status !== "done" && task.status !== "delivered") {
-        await doc.ref.update({
-          status: "revisions",
-          completedAt: null,
-        });
-        revisionedTaskId = doc.id;
-        break;
-      }
+    const taskDoc = await findCurrentTask(db, deliverableId);
+    if (taskDoc) {
+      await taskDoc.ref.update({ status: "revisions", completedAt: null });
+      revisionedTaskId = taskDoc.id;
     }
 
     // Add the note to the deliverable's notes subcollection (if provided).

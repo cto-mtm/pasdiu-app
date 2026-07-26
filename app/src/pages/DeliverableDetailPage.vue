@@ -1,25 +1,22 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { collection, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useDataStore } from '../stores/data'
 import { useAuthStore } from '../stores/auth'
-import { useBusy } from '../composables/useBusy'
 import { mapTask, mapDeliverable } from '../lib/mappers'
 import { currentStage } from '../lib/deliverableStage'
-import { statusColor, statusKey, isDoneStatus } from '../lib/status'
+import { statusColor, statusKey } from '../lib/status'
 import type { Deliverable, Task, Version, Note } from '../lib/types'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
 import BaseButton from '../components/BaseButton.vue'
 
 const { t } = useI18n()
 const route = useRoute()
-const router = useRouter()
 const data = useDataStore()
 const auth = useAuthStore()
-const { busy, run } = useBusy()
 
 const deliverableId = computed(() => String(route.params.deliverableId))
 const deliverable = ref<Deliverable | undefined>()

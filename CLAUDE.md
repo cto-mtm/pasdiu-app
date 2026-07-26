@@ -21,8 +21,8 @@
 ## Data & auth
 
 - Firebase **Auth** + **Firestore** (both emulator-backed in dev; wired in `app/src/lib/firebase.ts`, emulators-only when `import.meta.env.DEV`).
-- Pinia holds reactive client state; Firestore is the source of truth. All Firestore access goes through `app/src/stores/data.ts` — components never call the SDK directly.
-- Roles (`admin`/`pm`/`contractor`/`client`) live on the `users/{uid}` doc and drive router landing + gating in `app/src/router/index.ts`.
+- Pinia holds reactive client state; Firestore is the source of truth. Shared domain data flows through `app/src/stores/data.ts`. Read-only views (DeliverableDetailPage, CalendarPage, ClientPortalPage) may query Firestore directly using mappers from `app/src/lib/mappers.ts`.
+- Roles (`admin`/`pm`/`contractor`/`client`) live on **member docs** (`orgs/{orgId}/members/{uid}`) — NOT on `users/{uid}` (which is identity-only). The router reads the role via `useAuthStore`'s live member listener.
 - Seed demo users + data with `npm run seed` (in `firebase/`) while the emulators run. Security rules: `firebase/firestore.rules`.
 
 ## i18n rules (non-negotiable)

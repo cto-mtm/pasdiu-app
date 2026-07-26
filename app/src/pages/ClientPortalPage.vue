@@ -11,7 +11,6 @@ import { mapDeliverable } from '../lib/mappers'
 import { apiFetch } from '../lib/api'
 import type { Deliverable } from '../lib/types'
 import BaseButton from '../components/BaseButton.vue'
-import BaseInput from '../components/BaseInput.vue'
 import Modal from '../components/Modal.vue'
 import ModalFooter from '../components/ModalFooter.vue'
 

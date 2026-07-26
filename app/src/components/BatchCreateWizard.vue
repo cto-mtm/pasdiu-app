@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // BatchCreateWizard — multi-step flow for creating deliverables in bulk.
-// Steps: type → count/names → sub-group → assignees → due → preview → confirm.
+// Steps: count/names → sub-group → assignees → due → preview → confirm.
 // The preview step takes a plan object so phase 5's AI assistant can reuse it.
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -8,14 +8,12 @@ import { useDataStore } from '../stores/data'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 import { useBusy } from '../composables/useBusy'
-import { useEntitlements } from '../composables/useEntitlements'
 import { apiFetch } from '../lib/api'
-import type { DeliverableType, WorkflowStage } from '../lib/types'
+import type { WorkflowStage } from '../lib/types'
 import BaseButton from './BaseButton.vue'
 import BaseInput from './BaseInput.vue'
 import BaseSelect from './BaseSelect.vue'
 import Modal from './Modal.vue'
-import ModalFooter from './ModalFooter.vue'
 
 const props = defineProps<{
   open: boolean
@@ -61,9 +59,6 @@ const pipeline = computed<WorkflowStage[]>(() => {
   const orgDoc = auth.org
   return orgDoc?.pipeline?.stages ?? []
 })
-
-// Deliverable types (would need to be loaded — for now placeholder).
-const deliverableTypes = ref<DeliverableType[]>([])
 
 // Generated names from count + pattern.
 const generatedNames = computed(() => {
@@ -115,10 +110,6 @@ const limitWarning = computed(() => {
   }
   return null
 })
-
-function memberName(uid: string): string {
-  return data.userName(uid)
-}
 
 // ── Navigation ──────────────────────────────────────────────────────────────
 function next() { if (step.value < TOTAL_STEPS) step.value++ }
@@ -290,7 +281,7 @@ watch(() => props.open, (open) => {
           <div v-if="Object.keys(plan.assigneeSummary).length" class="mt-2 border-t pt-2" style="border-color: var(--border);">
             <p class="mb-1 text-xs font-medium" style="color: var(--text-muted);">{{ t('batchCreate.perAssignee') }}</p>
             <div v-for="(cnt, uid) in plan.assigneeSummary" :key="uid" class="flex justify-between text-sm">
-              <span style="color: var(--text);">{{ memberName(uid as string) }}</span>
+              <span style="color: var(--text);">{{ data.userName(uid as string) }}</span>
               <span style="color: var(--text-muted);">{{ cnt }} {{ t('board.tasksLabel') }}</span>
             </div>
           </div>

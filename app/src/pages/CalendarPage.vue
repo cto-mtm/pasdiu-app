@@ -14,7 +14,7 @@ import BaseInput from '../components/BaseInput.vue'
 import Modal from '../components/Modal.vue'
 import ModalFooter from '../components/ModalFooter.vue'
 
-const { t, d } = useI18n()
+const { t } = useI18n()
 const data = useDataStore()
 const auth = useAuthStore()
 
