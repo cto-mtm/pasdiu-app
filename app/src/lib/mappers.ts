@@ -5,8 +5,8 @@
 // Normalizers — seed/older docs may lack meta/brief fields, so default them.
 import { FREE_LIMITS } from './plans'
 import type {
-  Client, Invite, Membership, MetaField, Note, Org, OrgUsage, Plan, Project, Role, SubscriptionStatus,
-  Task, TaskStatus, UserProfile, Version,
+  Client, Deliverable, DeliverableStatus, DeliverableType, Invite, Membership, MetaField, Note, Org, OrgUsage, Plan, Project, Role, StageSummaryEntry, SubGroup, SubscriptionStatus,
+  Task, TaskStatus, UserProfile, Version, WorkflowPipeline, WorkflowStage,
 } from './types'
 
 // Firestore Timestamp | null → JS Date | null. Duck-typed so we don't need
@@ -26,6 +26,17 @@ function toDate(v: unknown): Date | null {
 
 export function mapClient(id: string, d: Record<string, unknown>): Client {
   return { id, orgId: d.orgId as string, name: d.name as string, meta: (d.meta as MetaField[]) ?? [] }
+}
+
+export function mapSubGroup(id: string, d: Record<string, unknown>): SubGroup {
+  return {
+    id,
+    orgId: d.orgId as string,
+    projectId: d.projectId as string,
+    name: d.name as string,
+    order: (d.order as number) ?? 0,
+    meta: (d.meta as MetaField[]) ?? [],
+  }
 }
 
 export function mapProject(id: string, d: Record<string, unknown>): Project {
@@ -66,6 +77,8 @@ export function mapTask(id: string, d: Record<string, unknown>): Task {
     dueAt: toDate(d.dueAt),
     createdAt: toDate(d.createdAt),
     completedAt: toDate(d.completedAt),
+    deliverableId: (d.deliverableId as string) ?? '',
+    stageId: (d.stageId as string) ?? '',
   }
 }
 
@@ -92,8 +105,10 @@ export function mapOrg(id: string, d: Record<string, unknown>): Org {
     seatLimit: (d.seatLimit as number) ?? FREE_LIMITS.seatLimit,
     clientLimit: (d.clientLimit as number) ?? FREE_LIMITS.clientLimit,
     taskLimit: (d.taskLimit as number) ?? FREE_LIMITS.taskLimit,
+    deliverableLimit: (d.deliverableLimit as number) ?? FREE_LIMITS.deliverableLimit,
     subscriptionStatus: (d.subscriptionStatus as SubscriptionStatus) ?? 'none',
     currentPeriodEnd: toDate(d.currentPeriodEnd),
+    pipeline: (d.pipeline as WorkflowPipeline) ?? { stages: [] },
   }
 }
 
@@ -104,6 +119,7 @@ export function mapUsage(d: Record<string, unknown>): OrgUsage {
     seats: (d.seats as number) ?? 0,
     activeClients: (d.activeClients as number) ?? 0,
     activeTasks: (d.activeTasks as number) ?? 0,
+    activeDeliverables: (d.activeDeliverables as number) ?? 0,
   }
 }
 
@@ -153,5 +169,37 @@ export function mapNote(id: string, d: Record<string, unknown>): Note {
     body: d.body as string,
     resolved: (d.resolved as boolean) ?? false,
     createdAt: toDate(d.createdAt),
+  }
+}
+
+export function mapDeliverable(id: string, d: Record<string, unknown>): Deliverable {
+  return {
+    id,
+    orgId: d.orgId as string,
+    clientId: d.clientId as string,
+    projectId: d.projectId as string,
+    subGroupId: d.subGroupId as string,
+    subGroupName: (d.subGroupName as string) ?? '',
+    typeId: (d.typeId as string) ?? '',
+    stages: (d.stages as WorkflowStage[]) ?? [],
+    stageSummary: (d.stageSummary as StageSummaryEntry[]) ?? [],
+    name: d.name as string,
+    status: (d.status as DeliverableStatus) ?? 'active',
+    clientVisible: (d.clientVisible as boolean) ?? false,
+    latestVersionUrl: (d.latestVersionUrl as string) ?? '',
+    order: (d.order as number) ?? 0,
+    meta: (d.meta as MetaField[]) ?? [],
+    createdAt: toDate(d.createdAt),
+    deliveredAt: toDate(d.deliveredAt),
+  }
+}
+
+export function mapDeliverableType(id: string, d: Record<string, unknown>): DeliverableType {
+  return {
+    id,
+    orgId: d.orgId as string,
+    name: d.name as string,
+    weight: (d.weight as number) ?? 1,
+    order: (d.order as number) ?? 0,
   }
 }

@@ -14,6 +14,7 @@ import ModalFooter from '../components/ModalFooter.vue'
 import MetaEditor from '../components/MetaEditor.vue'
 import StatusCounts from '../components/StatusCounts.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import InfoTip from '../components/InfoTip.vue'
 import type { MetaField } from '../lib/types'
 
 const { t } = useI18n()
@@ -147,8 +148,11 @@ onMounted(load)
     <Modal :open="showNew" :title="t('actions.newProject')" @close="showNew = false">
       <form class="space-y-4" @submit.prevent="create">
         <label class="block">
-          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('actions.nameLabel') }}</span>
-          <BaseInput v-model="name" autofocus />
+          <span class="mb-1 flex items-center gap-1 text-xs uppercase tracking-wide" style="color: var(--text-muted);">
+            {{ t('actions.nameLabel') }}
+            <InfoTip :text="t('client.projectExplainer')" />
+          </span>
+          <BaseInput v-model="name" autofocus :placeholder="t('client.projectPlaceholder')" />
         </label>
         <label class="block">
           <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('actions.viewLabel') }}</span>

@@ -209,7 +209,7 @@ export async function seedMember(
 export async function seedUsage(orgId: string, over: Doc = {}): Promise<void> {
   await getFirestore()
     .doc(`orgs/${orgId}/usage/current`)
-    .set(withoutUndefined({ seats: 1, activeClients: 0, activeTasks: 0, ...over }));
+    .set(withoutUndefined({ seats: 1, activeClients: 0, activeTasks: 0, activeDeliverables: 0, ...over }));
 }
 
 /** Pending invite (shape mirrors the app's createInvite + rules). */
@@ -256,11 +256,63 @@ export async function seedTask(orgId: string, id: string, over: Doc = {}): Promi
         clientId: "c-test",
         status: "backlog",
         assigneeUid: "u-assignee",
+        clientVisible: false,
+        blockedReason: "",
+        blockedAt: null,
+        deliveryNote: "",
         meta: [],
         order: 0,
         dueAt: new Date(Date.now() + 2 * 86400000),
         createdAt: new Date(),
         completedAt: null,
+        deliverableId: "",
+        stageId: "",
+        ...over,
+      })
+    );
+}
+
+/** Top-level deliverable doc (functions-only creation). */
+export async function seedDeliverable(orgId: string, id: string, over: Doc = {}): Promise<void> {
+  await getFirestore()
+    .doc(`deliverables/${id}`)
+    .set(
+      withoutUndefined({
+        orgId,
+        clientId: "c-test",
+        projectId: "p-test",
+        subGroupId: "sg-test",
+        subGroupName: "Test SubGroup",
+        typeId: "dt-test",
+        stages: [
+          { id: "s_capture", name: "Capture", optional: false, clientFacing: false },
+          { id: "s_edit", name: "Edit", optional: false, clientFacing: false },
+          { id: "s_review", name: "Review", optional: false, clientFacing: true },
+        ],
+        stageSummary: [],
+        name: `Deliverable ${id}`,
+        status: "active",
+        clientVisible: false,
+        latestVersionUrl: "",
+        order: 0,
+        meta: [],
+        createdAt: new Date(),
+        deliveredAt: null,
+        ...over,
+      })
+    );
+}
+
+/** Top-level deliverableType doc stamped with its orgId. */
+export async function seedDeliverableType(orgId: string, id: string, over: Doc = {}): Promise<void> {
+  await getFirestore()
+    .doc(`deliverableTypes/${id}`)
+    .set(
+      withoutUndefined({
+        orgId,
+        name: `Type ${id}`,
+        weight: 1,
+        order: 0,
         ...over,
       })
     );

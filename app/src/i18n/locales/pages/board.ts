@@ -15,6 +15,9 @@ const en = {
   hideAll: 'Hide all from client',
   shareAllConfirm: 'Make every task in this project visible to the client?',
   hideAllConfirm: 'Hide every task in this project from the client?',
+  subGroupExplainer: 'A sub-group is a batch within a project — e.g. "July", "August", "Teasers". Use it to organize work into manageable chunks that repeat or rotate.',
+  subGroupPlaceholder: 'e.g. July batch',
+  editSubGroup: 'Edit sub-group',
 }
 
 const es: typeof en = {
@@ -34,6 +37,9 @@ const es: typeof en = {
   hideAll: 'Ocultar todo al cliente',
   shareAllConfirm: '¿Hacer visibles para el cliente todas las tareas de este proyecto?',
   hideAllConfirm: '¿Ocultar al cliente todas las tareas de este proyecto?',
+  subGroupExplainer: 'Un subgrupo es un lote dentro de un proyecto — p. ej. «Julio», «Agosto», «Teasers». Úsalo para organizar el trabajo en bloques manejables que se repiten o rotan.',
+  subGroupPlaceholder: 'p. ej. Lote de julio',
+  editSubGroup: 'Editar subgrupo',
 }
 
 export default { en, es }

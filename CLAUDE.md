@@ -5,7 +5,8 @@
 - `shared/` — Monorepo shared package (`@pasdiu/shared`): domain models, plan constants, and Zod validation schemas
 - `app/` — Vue 3 + Vite web app, wrapped by Capacitor for iOS/Android
 - `firebase/` — Firebase Hosting config + Cloud Functions API (`firebase/functions`) + emulator scripts
-- `docs/` — Internal documentation (read `docs/animations.md` before touching any animation, `docs/i18n.md` before touching any user-facing string)
+- `docs/` — Internal documentation (read `docs/animations.md` before touching any animation, `docs/i18n.md` before touching any user-facing string, `docs/testing.md` before adding any API route or Firestore rule)
+- `docs/deliverables/` — Plan of record for the deliverables & production-pipeline initiative. Read `docs/deliverables/README.md` before working on deliverables, workflow stages, packages, recording sessions, or the client portal — it documents three verified constraints that invalidate the obvious approaches.
 
 ## Development
 

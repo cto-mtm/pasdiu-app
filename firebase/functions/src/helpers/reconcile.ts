@@ -8,11 +8,12 @@ import { logger } from "firebase-functions/v2";
 // documented in the rules), so drift is possible. This module is the healer:
 // recount reality with aggregate queries and overwrite the counters.
 
-/** The three counters on orgs/{orgId}/usage/current. */
+/** The counters on orgs/{orgId}/usage/current. */
 export interface UsageCounters {
   seats: number;
   activeClients: number;
   activeTasks: number;
+  activeDeliverables: number;
 }
 
 export interface ReconcileResult {
@@ -44,10 +45,11 @@ function counterOf(value: unknown): number {
 export async function reconcileOrg(orgId: string): Promise<ReconcileResult> {
   const db = getFirestore();
   const usageRef = db.doc(`orgs/${orgId}/usage/current`);
-  const [membersAgg, clientsAgg, tasksAgg, usageSnap] = await Promise.all([
+  const [membersAgg, clientsAgg, tasksAgg, deliverablesAgg, usageSnap] = await Promise.all([
     db.collection(`orgs/${orgId}/members`).count().get(),
     db.collection("clients").where("orgId", "==", orgId).count().get(),
     db.collection("tasks").where("orgId", "==", orgId).count().get(),
+    db.collection("deliverables").where("orgId", "==", orgId).where("status", "==", "active").count().get(),
     usageRef.get(),
   ]);
 
@@ -55,17 +57,20 @@ export async function reconcileOrg(orgId: string): Promise<ReconcileResult> {
     seats: counterOf(usageSnap.get("seats")),
     activeClients: counterOf(usageSnap.get("activeClients")),
     activeTasks: counterOf(usageSnap.get("activeTasks")),
+    activeDeliverables: counterOf(usageSnap.get("activeDeliverables")),
   };
   const after: UsageCounters = {
     seats: membersAgg.data().count,
     activeClients: clientsAgg.data().count,
     activeTasks: tasksAgg.data().count,
+    activeDeliverables: deliverablesAgg.data().count,
   };
 
   const healed =
     before.seats !== after.seats ||
     before.activeClients !== after.activeClients ||
-    before.activeTasks !== after.activeTasks;
+    before.activeTasks !== after.activeTasks ||
+    before.activeDeliverables !== after.activeDeliverables;
 
   if (healed) {
     await usageRef.set(after, { merge: true });

@@ -28,14 +28,17 @@ export interface Org {
   seatLimit: number
   clientLimit: number
   taskLimit: number
+  deliverableLimit: number
   subscriptionStatus: SubscriptionStatus
   currentPeriodEnd: Date | null
+  pipeline: WorkflowPipeline
 }
 
 export interface OrgUsage {
   seats: number
   activeClients: number
   activeTasks: number
+  activeDeliverables: number
 }
 
 export type BillingInterval = 'month' | 'year'
@@ -44,6 +47,7 @@ export interface PlanConfig {
   seatLimit: number
   clientLimit: number
   taskLimit: number
+  deliverableLimit: number
   priceMonthly: number
   priceAnnual: number
 }
@@ -144,6 +148,7 @@ export interface SubGroup {
   projectId: string
   name: string
   order: number
+  meta: MetaField[]
 }
 
 export interface Task {
@@ -165,6 +170,8 @@ export interface Task {
   dueAt: Date | null
   createdAt: Date | null
   completedAt: Date | null
+  deliverableId: string
+  stageId: string
 }
 
 export interface Version {
@@ -182,4 +189,56 @@ export interface Note {
   body: string
   resolved: boolean
   createdAt: Date | null
+}
+
+// ── Deliverables & Workflow ──────────────────────────────────────────────────
+
+export interface WorkflowStage {
+  id: string
+  name: string
+  optional: boolean
+  clientFacing: boolean
+}
+
+export interface WorkflowPipeline {
+  stages: WorkflowStage[]
+}
+
+export interface DeliverableType {
+  id: string
+  orgId: string
+  name: string
+  weight: number
+  order: number
+}
+
+export type DeliverableStatus = 'active' | 'delivered' | 'canceled'
+
+export interface StageSummaryEntry {
+  stageId: string
+  name: string
+  status: TaskStatus
+  assigneeUid: string
+  assigneeName: string
+  dueAt: Date | null
+}
+
+export interface Deliverable {
+  id: string
+  orgId: string
+  clientId: string
+  projectId: string
+  subGroupId: string
+  subGroupName: string
+  typeId: string
+  stages: WorkflowStage[]
+  stageSummary: StageSummaryEntry[]
+  name: string
+  status: DeliverableStatus
+  clientVisible: boolean
+  latestVersionUrl: string
+  order: number
+  meta: MetaField[]
+  createdAt: Date | null
+  deliveredAt: Date | null
 }

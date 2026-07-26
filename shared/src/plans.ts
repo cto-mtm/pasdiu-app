@@ -3,9 +3,9 @@ import type { Plan } from './types.js'
 // Single source of truth for plan entitlements and numeric limits.
 // -1 means unlimited.
 export const PLAN_LIMITS = {
-  free: { seatLimit: 2, clientLimit: 3, taskLimit: 500 },
-  studio: { seatLimit: 15, clientLimit: 25, taskLimit: 10000 },
-  agency: { seatLimit: 50, clientLimit: -1, taskLimit: -1 },
+  free: { seatLimit: 2, clientLimit: 3, taskLimit: 500, deliverableLimit: 50 },
+  studio: { seatLimit: 15, clientLimit: 25, taskLimit: 10000, deliverableLimit: 2000 },
+  agency: { seatLimit: 50, clientLimit: -1, taskLimit: -1, deliverableLimit: -1 },
 } as const
 
 export type PlanId = keyof typeof PLAN_LIMITS
@@ -28,11 +28,11 @@ export const PLAN_PRICING = DISPLAY_PRICES
 // Display-only tier limits for pricing cards.
 export const PLAN_DISPLAY_LIMITS: Record<
   Plan,
-  { seats: number; clients: number; tasks: number }
+  { seats: number; clients: number; tasks: number; deliverables: number }
 > = {
-  free: { seats: 2, clients: 3, tasks: 500 },
-  studio: { seats: 15, clients: 25, tasks: 10000 },
-  agency: { seats: 50, clients: -1, tasks: -1 },
+  free: { seats: 2, clients: 3, tasks: 500, deliverables: 50 },
+  studio: { seats: 15, clients: 25, tasks: 10000, deliverables: 2000 },
+  agency: { seats: 50, clients: -1, tasks: -1, deliverables: -1 },
 }
 
 // Plan → feature-flag table for UI feature gating.

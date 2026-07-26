@@ -92,6 +92,31 @@ const taskStatus = ref<TaskStatus>('backlog')
 const taskDue = ref('')
 const taskClientVisible = ref(false)
 
+// Edit sub-group
+const showEditSub = ref(false)
+const editSubId = ref('')
+const editSubName = ref('')
+const editSubMeta = ref<MetaField[]>([])
+
+function openEditSub(sgId: string) {
+  const sg = subGroups.value.find((s) => s.id === sgId)
+  if (!sg) return
+  editSubId.value = sg.id
+  editSubName.value = sg.name
+  editSubMeta.value = sg.meta.map((f) => ({ ...f }))
+  showEditSub.value = true
+}
+async function saveSubGroup() {
+  if (!editSubName.value.trim()) return
+  await run(async () => {
+    await data.updateSubGroup(editSubId.value, {
+      name: editSubName.value.trim(),
+      meta: editSubMeta.value.filter((f) => f.label.trim() || f.value.trim()),
+    })
+    showEditSub.value = false
+  })
+}
+
 async function createSub() {
   if (!subName.value.trim()) return
   await run(async () => {
@@ -286,6 +311,16 @@ onMounted(load)
             <button
               v-if="auth.isManager"
               class="text-xs"
+              style="color: var(--text-muted);"
+              :aria-label="t('board.editSubGroup')"
+              :title="t('board.editSubGroup')"
+              @click="openEditSub(sg.id)"
+            >
+              ✎
+            </button>
+            <button
+              v-if="auth.isManager"
+              class="text-xs"
               style="color: var(--accent-amber);"
               :aria-label="t('actions.delete')"
               :title="t('actions.delete')"
@@ -296,6 +331,12 @@ onMounted(load)
           </div>
           <StatusCounts :tasks="tasksBySubGroup(sg.id)" />
         </div>
+        <dl v-if="sg.meta.length" class="mb-2 flex flex-wrap gap-x-6 gap-y-1">
+          <div v-for="(f, i) in sg.meta" :key="i">
+            <dt class="text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ f.label }}</dt>
+            <dd class="text-sm" style="color: var(--text);">{{ f.value }}</dd>
+          </div>
+        </dl>
         <TransitionGroup name="list" tag="div" class="space-y-2">
           <TaskCard v-for="tk in tasksBySubGroup(sg.id)" :key="tk.id" :task="tk" />
         </TransitionGroup>
@@ -308,8 +349,11 @@ onMounted(load)
     <Modal :open="showEditProject" :title="t('actions.editProject')" @close="showEditProject = false">
       <form class="space-y-4" @submit.prevent="saveProject">
         <label class="block">
-          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('actions.nameLabel') }}</span>
-          <BaseInput v-model="epName" />
+          <span class="mb-1 flex items-center gap-1 text-xs uppercase tracking-wide" style="color: var(--text-muted);">
+            {{ t('actions.nameLabel') }}
+            <InfoTip :text="t('client.projectExplainer')" />
+          </span>
+          <BaseInput v-model="epName" :placeholder="t('client.projectPlaceholder')" />
         </label>
         <label class="block">
           <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('actions.viewLabel') }}</span>
@@ -362,10 +406,34 @@ onMounted(load)
     <Modal :open="showSub" :title="t('actions.newSubGroup')" @close="showSub = false">
       <form class="space-y-4" @submit.prevent="createSub">
         <label class="block">
-          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('actions.nameLabel') }}</span>
-          <BaseInput v-model="subName" autofocus />
+          <span class="mb-1 flex items-center gap-1 text-xs uppercase tracking-wide" style="color: var(--text-muted);">
+            {{ t('actions.nameLabel') }}
+            <InfoTip :text="t('board.subGroupExplainer')" />
+          </span>
+          <BaseInput v-model="subName" autofocus :placeholder="t('board.subGroupPlaceholder')" />
         </label>
         <ModalFooter :label="t('actions.create')" :busy="busy" @cancel="showSub = false" @submit="createSub" />
+      </form>
+    </Modal>
+
+    <!-- Edit sub-group -->
+    <Modal :open="showEditSub" :title="t('board.editSubGroup')" @close="showEditSub = false">
+      <form class="space-y-4" @submit.prevent="saveSubGroup">
+        <label class="block">
+          <span class="mb-1 flex items-center gap-1 text-xs uppercase tracking-wide" style="color: var(--text-muted);">
+            {{ t('actions.nameLabel') }}
+            <InfoTip :text="t('board.subGroupExplainer')" />
+          </span>
+          <BaseInput v-model="editSubName" autofocus :placeholder="t('board.subGroupPlaceholder')" />
+        </label>
+        <div>
+          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('actions.metadata') }}</span>
+          <MetaEditor
+            v-model="editSubMeta"
+            :suggestions="[t('meta.deadline'), t('meta.links'), t('meta.driveFolder')]"
+          />
+        </div>
+        <ModalFooter :label="t('actions.save')" :busy="busy" @cancel="showEditSub = false" @submit="saveSubGroup" />
       </form>
     </Modal>
 

@@ -25,7 +25,7 @@ import { i18n } from '../i18n'
 import { useAuthStore } from './auth'
 import { useToastStore } from './toast'
 import { track } from '../lib/analytics'
-import { mapClient, mapInvite, mapMember, mapNote, mapProject, mapTask, mapVersion } from '../lib/mappers'
+import { mapClient, mapInvite, mapMember, mapNote, mapProject, mapSubGroup, mapTask, mapVersion } from '../lib/mappers'
 import { isDoneStatus } from '../lib/status'
 import type {
   Client, Invite, Project, Role, SubGroup, Task, TaskStatus, Version, Note, UserProfile, MetaField,
@@ -226,7 +226,7 @@ export const useDataStore = defineStore('data', () => {
       getDocs(query(collection(db, 'subGroups'), where('orgId', '==', orgId), where('projectId', '==', projectId))),
       getDocs(query(collection(db, 'tasks'), where('orgId', '==', orgId), where('projectId', '==', projectId))),
     ])
-    sgSnap.forEach((d) => upsert(subGroups.value, { id: d.id, ...(d.data() as Omit<SubGroup, 'id'>) }))
+    sgSnap.forEach((d) => upsert(subGroups.value, mapSubGroup(d.id, d.data())))
     tSnap.forEach((d) => upsert(tasks.value, mapTask(d.id, d.data())))
   }
 
@@ -405,13 +405,21 @@ export const useDataStore = defineStore('data', () => {
     invites.value = invites.value.filter((i) => i.id !== id)
   }
 
-  async function createSubGroup(projectId: string, name: string): Promise<SubGroup> {
+  async function createSubGroup(projectId: string, name: string, meta: MetaField[] = []): Promise<SubGroup> {
     const orgId = requireOrgId()
     const order = subGroupsForProject(projectId).length
-    const ref = await guarded(() => addDoc(collection(db, 'subGroups'), { orgId, projectId, name, order }))
-    const s: SubGroup = { id: ref.id, orgId, projectId, name, order }
+    const ref = await guarded(() => addDoc(collection(db, 'subGroups'), { orgId, projectId, name, order, meta }))
+    const s: SubGroup = { id: ref.id, orgId, projectId, name, order, meta }
     upsert(subGroups.value, s)
     return s
+  }
+  async function updateSubGroup(id: string, fields: { name?: string; meta?: MetaField[] }): Promise<void> {
+    await guarded(() => updateDoc(doc(db, 'subGroups', id), fields))
+    const existing = subGroups.value.find((s) => s.id === id)
+    if (existing) {
+      if (fields.name !== undefined) existing.name = fields.name
+      if (fields.meta !== undefined) existing.meta = fields.meta
+    }
   }
   async function createTask(input: {
     projectId: string; subGroupId: string; clientId: string; title: string
@@ -651,7 +659,7 @@ export const useDataStore = defineStore('data', () => {
     loadAllTasks, loadMoreTasks, loadTasksForClient,
     loadInvites, createInvite, revokeInvite,
     createClient, createProject, createSubGroup, createTask,
-    updateClient, updateProject, updateProjectBrief, updateMember, updateTask,
+    updateClient, updateProject, updateProjectBrief, updateMember, updateSubGroup, updateTask,
     updateTaskStatus, setProjectTasksVisibility,
     deleteTask, deleteSubGroup, deleteProject, deleteClient,
     loadVersions, loadNotes, addNote, setNoteResolved, addVersion,

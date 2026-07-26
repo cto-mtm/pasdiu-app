@@ -47,8 +47,8 @@ const userByUid = (uid) => USERS.find((u) => u.uid === uid);
  *  - o_northlight stays FREE and AT its 2-seat limit ON PURPOSE — it demos
  *    the seat gate + upsell (invites there are denied by the rules).
  */
-const FREE_PLAN = { plan: "free", seatLimit: 2, clientLimit: 3, taskLimit: 500, subscriptionStatus: "none" };
-const STUDIO_PLAN = { plan: "studio", seatLimit: 15, clientLimit: 25, taskLimit: 10000, subscriptionStatus: "active" };
+const FREE_PLAN = { plan: "free", seatLimit: 2, clientLimit: 3, taskLimit: 500, deliverableLimit: 50, subscriptionStatus: "none" };
+const STUDIO_PLAN = { plan: "studio", seatLimit: 15, clientLimit: 25, taskLimit: 10000, deliverableLimit: 2000, subscriptionStatus: "active" };
 
 const ORGS = [
   {
@@ -97,12 +97,22 @@ async function seedUsers() {
 
 async function seedOrgs() {
   const batch = db.batch();
+  const DEFAULT_PIPELINE = {
+    stages: [
+      { id: "s_discovery", name: "Discovery", optional: true, clientFacing: false },
+      { id: "s_capture", name: "Capture", optional: false, clientFacing: false },
+      { id: "s_edit", name: "Edit", optional: false, clientFacing: false },
+      { id: "s_review", name: "Review", optional: false, clientFacing: true },
+      { id: "s_approval", name: "Approval", optional: false, clientFacing: true },
+    ],
+  };
   for (const org of ORGS) {
     batch.set(db.doc(`orgs/${org.id}`), {
       name: org.name,
       createdAt: new Date(),
       ownerUid: org.ownerUid,
       ...org.billing,
+      pipeline: DEFAULT_PIPELINE,
     });
     for (const m of org.members) {
       const u = userByUid(m.uid);
@@ -118,15 +128,12 @@ async function seedOrgs() {
       if (m.clientId) member.clientId = m.clientId;
       batch.set(db.doc(`orgs/${org.id}/members/${m.uid}`), member);
     }
-    // Entitlement counters (Phase 2): real counts derived from the seeded
-    // arrays below. activeTasks counts ALL live task docs regardless of
-    // status — "active" means the doc exists, not that work is in flight.
-    // (The Admin SDK bypasses the rules gates, so the demo data seeds fine
-    // even where it sits AT a plan limit, e.g. Northlight's seats.)
+    // Entitlement counters: real counts derived from the seeded arrays below.
     batch.set(db.doc(`orgs/${org.id}/usage/current`), {
       seats: org.members.length,
       activeClients: CLIENTS.filter((c) => c.orgId === org.id).length,
       activeTasks: TASKS.filter((t) => subGroupOf(t.sg).orgId === org.id).length,
+      activeDeliverables: DELIVERABLES.filter((d) => d.orgId === org.id && d.status === "active").length,
     });
   }
   await batch.commit();
@@ -195,6 +202,35 @@ function clientOf(projectId) {
   return PROJECTS.find((p) => p.id === projectId).clientId;
 }
 
+// Default deliverable types seeded per org.
+const DELIVERABLE_TYPES = [
+  { id: "dt_longform_pasdiu", orgId: "o_pasdiu", name: "Long-form", weight: 15, order: 0 },
+  { id: "dt_short_pasdiu", orgId: "o_pasdiu", name: "Short", weight: 3, order: 1 },
+  { id: "dt_clip_pasdiu", orgId: "o_pasdiu", name: "Clip", weight: 1, order: 2 },
+  { id: "dt_longform_north", orgId: "o_northlight", name: "Long-form", weight: 15, order: 0 },
+  { id: "dt_short_north", orgId: "o_northlight", name: "Short", weight: 3, order: 1 },
+  { id: "dt_clip_north", orgId: "o_northlight", name: "Clip", weight: 1, order: 2 },
+];
+
+// Default pipeline stages (snapshot stored on each deliverable at creation).
+const DEFAULT_STAGES = [
+  { id: "s_discovery", name: "Discovery", optional: true, clientFacing: false },
+  { id: "s_capture", name: "Capture", optional: false, clientFacing: false },
+  { id: "s_edit", name: "Edit", optional: false, clientFacing: false },
+  { id: "s_review", name: "Review", optional: false, clientFacing: true },
+  { id: "s_approval", name: "Approval", optional: false, clientFacing: true },
+];
+
+// Demo deliverables — a few in Pasdiu Studio to demonstrate the model.
+// Each deliverable has stage-tasks that link back via deliverableId + stageId.
+const DELIVERABLES = [
+  { id: "del_1", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 01 — Teaser", status: "active", clientVisible: true, order: 0 },
+  { id: "del_2", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 02 — Product hero", status: "active", clientVisible: true, order: 1 },
+  { id: "del_3", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 03 — Testimonial", status: "active", clientVisible: false, order: 2 },
+  { id: "del_4", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_yt", subGroupName: "YouTube Cutdowns", typeId: "dt_longform_pasdiu", name: "60s Cutdown", status: "delivered", clientVisible: true, order: 0 },
+  { id: "del_5", orgId: "o_northlight", clientId: "c_beacon", projectId: "p_roast", subGroupId: "sg_spots", subGroupName: "Launch Spots", typeId: "dt_short_north", name: "Spot 01 — Roast reveal", status: "active", clientVisible: true, order: 0 },
+];
+
 async function seedData() {
   const batch = db.batch();
 
@@ -205,7 +241,7 @@ async function seedData() {
       meta: [{ label: "Budget", value: "$12k" }, { label: "Kickoff", value: "Jun 1" }],
     });
   for (const s of SUBGROUPS)
-    batch.set(db.doc(`subGroups/${s.id}`), { orgId: s.orgId, projectId: s.projectId, name: s.name, order: s.order });
+    batch.set(db.doc(`subGroups/${s.id}`), { orgId: s.orgId, projectId: s.projectId, name: s.name, order: s.order, meta: [] });
 
   for (const t of TASKS) {
     const sg = subGroupOf(t.sg);
@@ -230,9 +266,42 @@ async function seedData() {
       dueAt: days(t.due),
       createdAt: days(-10),
       completedAt: done ? days(t.due) : null,
+      deliverableId: "",
+      stageId: "",
     });
   }
   await batch.commit();
+
+  // Deliverable types
+  const dtBatch = db.batch();
+  for (const dt of DELIVERABLE_TYPES) {
+    dtBatch.set(db.doc(`deliverableTypes/${dt.id}`), { orgId: dt.orgId, name: dt.name, weight: dt.weight, order: dt.order });
+  }
+  await dtBatch.commit();
+
+  // Deliverables (with stage snapshots and initial stageSummary)
+  const delBatch = db.batch();
+  for (const d of DELIVERABLES) {
+    delBatch.set(db.doc(`deliverables/${d.id}`), {
+      orgId: d.orgId,
+      clientId: d.clientId,
+      projectId: d.projectId,
+      subGroupId: d.subGroupId,
+      subGroupName: d.subGroupName,
+      typeId: d.typeId,
+      stages: DEFAULT_STAGES,
+      stageSummary: [],
+      name: d.name,
+      status: d.status,
+      clientVisible: d.clientVisible,
+      latestVersionUrl: "",
+      order: d.order,
+      meta: [],
+      createdAt: days(-10),
+      deliveredAt: d.status === "delivered" ? days(-1) : null,
+    });
+  }
+  await delBatch.commit();
 
   // Versions + threaded notes (separate writes; small volume).
   for (const t of TASKS) {

@@ -108,6 +108,19 @@ service cloud.firestore {
           && taskData(taskId).get('clientVisible', false) == true);
     }
 
+    // Parent-deliverable lookup for subcollections (versions/notes on
+    // deliverables). Same three-way shape as hasTaskAccess.
+    function deliverableData(deliverableId) {
+      return get(/databases/$(database)/documents/deliverables/$(deliverableId)).data;
+    }
+    function hasDeliverableAccess(deliverableId) {
+      return isManagerOf(deliverableData(deliverableId).orgId)
+        || isContractorOf(deliverableData(deliverableId).orgId)
+        || (isClientOf(deliverableData(deliverableId).orgId)
+          && deliverableData(deliverableId).clientId == myClientIdIn(deliverableData(deliverableId).orgId)
+          && deliverableData(deliverableId).get('clientVisible', false) == true);
+    }
+
     // Users: global identity ONLY ({displayName, email, createdAt}) — role and
     // clientId live on membership docs, so there is no privilege to escalate
     // here. Each user reads/writes their own doc; display names shown in-app
@@ -126,14 +139,15 @@ service cloud.firestore {
     // queued by the onInviteCreated function): no match block, so clients can
     // NEVER write mail docs — that default deny is the anti-spam property.
 
-    // Orgs: readable by members. Managers may rename; everything else on the
-    // org doc (ownerUid + the billing block: plan, limits, subscriptionStatus,
-    // stripeCustomerId/stripeSubscriptionId/currentPeriodEnd) is written ONLY
-    // via the Admin SDK (functions/seed) — updates may touch nothing but name.
+    // Orgs: readable by members. Managers may rename and edit the workflow
+    // pipeline; everything else on the org doc (ownerUid + the billing block:
+    // plan, limits, subscriptionStatus, stripeCustomerId/stripeSubscriptionId/
+    // currentPeriodEnd, deliverableLimit) is written ONLY via the Admin SDK
+    // (functions/seed) — updates may touch nothing but name and pipeline.
     match /orgs/{orgId} {
       allow read: if isMemberOf(orgId);
       allow update: if isManagerOf(orgId)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'pipeline'])
         && request.resource.data.name is string
         && request.resource.data.name.size() <= 60;
       allow create, delete: if false; // functions only
@@ -294,12 +308,13 @@ service cloud.firestore {
                 && request.resource.data.status != 'approved'
                 && request.resource.data.get('blockedReason', '') is string
                 && request.resource.data.get('deliveryNote', '') is string)
-              // Owning client: approval only, only on tasks shared with them,
-              // and never touching the documentation fields.
+              // Owning client: approval or request-changes (revisions), only
+              // on tasks shared with them, and never touching the
+              // documentation fields.
               || (isClientOf(resource.data.orgId)
                 && resource.data.clientId == myClientIdIn(resource.data.orgId)
                 && resource.data.get('clientVisible', false) == true
-                && request.resource.data.status == 'approved'
+                && request.resource.data.status in ['approved', 'revisions']
                 && request.resource.data.diff(resource.data).affectedKeys()
                   .hasOnly(['status', 'completedAt']))
             )
@@ -334,6 +349,63 @@ service cloud.firestore {
         allow delete: if isManagerOf(taskData(taskId).orgId)
           || resource.data.authorUid == request.auth.uid;
       }
+    }
+
+    // ── Deliverables ──────────────────────────────────────────────────────────
+    // The atomic unit of agency output: one video/clip/short. Created and
+    // deleted ONLY by the server-side batch endpoint (Admin SDK, bypasses
+    // rules). This sidesteps the counter-pairing problem in constraint 1
+    // entirely. Managers may update a safe subset of fields (name, meta,
+    // order, clientVisible). Approval-attribution fields (approvedBy,
+    // approvedVia, approvedAt) and the trigger-maintained stageSummary are
+    // excluded so audit records can't be forged and the display cache can't
+    // be corrupted by a client SDK write.
+    match /deliverables/{deliverableId} {
+      allow read: if isManagerOf(resource.data.orgId)
+        || isContractorOf(resource.data.orgId)
+        || (isClientOf(resource.data.orgId)
+          && resource.data.clientId == myClientIdIn(resource.data.orgId)
+          && resource.data.get('clientVisible', false) == true);
+      allow create, delete: if false; // functions only (batch endpoint)
+      allow update: if isManagerOf(resource.data.orgId)
+        && orgIdUnchanged()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['name', 'meta', 'order', 'clientVisible', 'status']);
+
+      // Versions live on deliverables (a version is of the video, not of a
+      // single stage). Read access mirrors the deliverable; write is manager
+      // or contractor (checked via the deliverable's orgId).
+      match /versions/{versionId} {
+        allow read: if hasDeliverableAccess(deliverableId);
+        allow write: if isManagerOf(deliverableData(deliverableId).orgId)
+          || isContractorOf(deliverableData(deliverableId).orgId);
+      }
+
+      // Deliverable-level notes (cross-stage handoff thread, version feedback).
+      // Same access pattern as task notes but against the parent deliverable.
+      match /notes/{noteId} {
+        allow read: if hasDeliverableAccess(deliverableId);
+        allow create: if hasDeliverableAccess(deliverableId)
+          && request.resource.data.authorUid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['versionId', 'authorUid', 'body', 'resolved', 'createdAt']);
+        allow update: if isManagerOf(deliverableData(deliverableId).orgId)
+          || (resource.data.authorUid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['resolved', 'body']));
+        allow delete: if isManagerOf(deliverableData(deliverableId).orgId)
+          || resource.data.authorUid == request.auth.uid;
+      }
+    }
+
+    // ── Deliverable types ─────────────────────────────────────────────────────
+    // Org configuration: "Long-form", "Short", "Clip" with capacity weights.
+    // Same access pattern as subGroups: managers write, managers/contractors
+    // read. Clients have no reason to see types.
+    match /deliverableTypes/{typeId} {
+      allow read: if isManagerOf(resource.data.orgId) || isContractorOf(resource.data.orgId);
+      allow create: if hasOrgId() && isManagerOf(request.resource.data.orgId);
+      allow update: if isManagerOf(resource.data.orgId) && orgIdUnchanged();
+      allow delete: if isManagerOf(resource.data.orgId);
     }
   }
 }

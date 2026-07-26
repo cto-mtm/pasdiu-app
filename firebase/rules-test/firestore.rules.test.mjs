@@ -109,6 +109,45 @@ before(async () => {
     }
     // A note AUTHORED BY the client user — the author-update scope tests.
     await setDoc(doc(db, 'tasks/t1/notes/ncl'), { versionId: 'v1', authorUid: 'cl', body: 'Hold the logo.', resolved: false, createdAt: new Date() })
+
+    // ── Deliverables ──────────────────────────────────────────────────────
+    // d1: org A, tenant c1, visible to client — client-allowed reads.
+    await setDoc(doc(db, 'deliverables/d1'), {
+      orgId: 'o_a', clientId: 'c1', projectId: 'p1', subGroupId: 'sg1',
+      subGroupName: 'Batch 1', typeId: 'dt1', name: 'Video 1',
+      stages: [{ id: 's1', name: 'Edit', optional: false, clientFacing: false }],
+      stageSummary: [], status: 'active', clientVisible: true,
+      latestVersionUrl: '', order: 0, meta: [], createdAt: new Date(), deliveredAt: null,
+    })
+    // d2: org A, tenant c2, visible — tests tenant scoping for clients.
+    await setDoc(doc(db, 'deliverables/d2'), {
+      orgId: 'o_a', clientId: 'c2', projectId: 'p2', subGroupId: 'sg2',
+      subGroupName: 'Batch 2', typeId: 'dt1', name: 'Video 2',
+      stages: [], stageSummary: [], status: 'active', clientVisible: true,
+      latestVersionUrl: '', order: 0, meta: [], createdAt: new Date(), deliveredAt: null,
+    })
+    // d3: org A, tenant c1, NOT visible — tests clientVisible gate.
+    await setDoc(doc(db, 'deliverables/d3'), {
+      orgId: 'o_a', clientId: 'c1', projectId: 'p1', subGroupId: 'sg1',
+      subGroupName: 'Batch 1', typeId: 'dt1', name: 'Video 3',
+      stages: [], stageSummary: [], status: 'active', clientVisible: false,
+      latestVersionUrl: '', order: 0, meta: [], createdAt: new Date(), deliveredAt: null,
+    })
+    // db1: org B — invisible to org-A-only users.
+    await setDoc(doc(db, 'deliverables/db1'), {
+      orgId: 'o_b', clientId: 'cb', projectId: 'pb', subGroupId: 'sgb',
+      subGroupName: 'Batch B', typeId: 'dt1', name: 'Video B',
+      stages: [], stageSummary: [], status: 'active', clientVisible: true,
+      latestVersionUrl: '', order: 0, meta: [], createdAt: new Date(), deliveredAt: null,
+    })
+
+    // Deliverable types
+    await setDoc(doc(db, 'deliverableTypes/dt1'), { orgId: 'o_a', name: 'Short', weight: 3, order: 0 })
+    await setDoc(doc(db, 'deliverableTypes/dtb'), { orgId: 'o_b', name: 'Clip', weight: 1, order: 0 })
+
+    // Deliverable subcollections (versions + notes)
+    await setDoc(doc(db, 'deliverables/d1/versions/dv1'), { label: 'v1', note: 'First cut.', mediaUrl: '', createdAt: new Date() })
+    await setDoc(doc(db, 'deliverables/d1/notes/dn1'), { versionId: 'dv1', authorUid: 'mgr', body: 'Looks good.', resolved: false, createdAt: new Date() })
   })
 })
 
@@ -563,4 +602,108 @@ test('unauthenticated users cannot read tasks, users, orgs or members', async ()
   await assertFails(getDoc(doc(anon, 'users/mgr')))
   await assertFails(getDoc(doc(anon, 'orgs/o_a')))
   await assertFails(getDoc(doc(anon, 'orgs/o_a/members/mgr')))
+})
+
+// ── deliverables: functions-only create/delete, client-scoped reads ─────────
+
+test('deliverable create is denied for every role (functions-only)', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  const ed = env.authenticatedContext('ed').firestore()
+  const cl = env.authenticatedContext('cl').firestore()
+  const del = { orgId: 'o_a', clientId: 'c1', projectId: 'p1', subGroupId: 'sg1', subGroupName: 'X', typeId: 'dt1', name: 'New', stages: [], stageSummary: [], status: 'active', clientVisible: true, latestVersionUrl: '', order: 0, meta: [], createdAt: new Date(), deliveredAt: null }
+  await assertFails(setDoc(doc(mgr, 'deliverables/d_new'), del))
+  await assertFails(setDoc(doc(ed, 'deliverables/d_new'), del))
+  await assertFails(setDoc(doc(cl, 'deliverables/d_new'), del))
+})
+
+test('deliverable delete is denied for every role (functions-only)', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertFails(deleteDoc(doc(mgr, 'deliverables/d1')))
+})
+
+test('client reads only their own tenant deliverables with clientVisible', async () => {
+  const cl = env.authenticatedContext('cl').firestore()
+  // d1: own tenant + visible → allowed
+  await assertSucceeds(getDoc(doc(cl, 'deliverables/d1')))
+  // d2: wrong tenant → denied
+  await assertFails(getDoc(doc(cl, 'deliverables/d2')))
+  // d3: own tenant but not visible → denied
+  await assertFails(getDoc(doc(cl, 'deliverables/d3')))
+})
+
+test('manager can read all org deliverables; cross-org denied', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertSucceeds(getDoc(doc(mgr, 'deliverables/d1')))
+  await assertSucceeds(getDoc(doc(mgr, 'deliverables/d3'))) // not visible but manager can read
+  await assertFails(getDoc(doc(mgr, 'deliverables/db1')))   // wrong org
+})
+
+test('manager can update safe fields on deliverable', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertSucceeds(updateDoc(doc(mgr, 'deliverables/d1'), { name: 'Renamed', clientVisible: false }))
+})
+
+test('manager cannot update approval or stageSummary fields on deliverable', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertFails(updateDoc(doc(mgr, 'deliverables/d1'), { stageSummary: [{ stageId: 's1', name: 'Edit', status: 'done', assigneeUid: '', assigneeName: '', dueAt: null }] }))
+})
+
+test('contractor cannot update deliverables', async () => {
+  const ed = env.authenticatedContext('ed').firestore()
+  await assertFails(updateDoc(doc(ed, 'deliverables/d1'), { name: 'Hax' }))
+})
+
+test('activeDeliverables is rejected from client-SDK usage writes', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertFails(updateDoc(doc(mgr, 'orgs/o_a/usage/current'), { activeDeliverables: 99 }))
+})
+
+// ── deliverableTypes: mirrors subGroups access ──────────────────────────────
+
+test('manager can CRUD deliverable types', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertSucceeds(getDoc(doc(mgr, 'deliverableTypes/dt1')))
+  await assertSucceeds(setDoc(doc(mgr, 'deliverableTypes/dt_new'), { orgId: 'o_a', name: 'Long-form', weight: 15, order: 1 }))
+  await assertSucceeds(updateDoc(doc(mgr, 'deliverableTypes/dt1'), { name: 'Reel' }))
+  await assertSucceeds(deleteDoc(doc(mgr, 'deliverableTypes/dt_new')))
+})
+
+test('contractor can read but not write deliverable types', async () => {
+  const ed = env.authenticatedContext('ed').firestore()
+  await assertSucceeds(getDoc(doc(ed, 'deliverableTypes/dt1')))
+  await assertFails(setDoc(doc(ed, 'deliverableTypes/dt_nope'), { orgId: 'o_a', name: 'Nope', weight: 1, order: 0 }))
+})
+
+test('client cannot read deliverable types', async () => {
+  const cl = env.authenticatedContext('cl').firestore()
+  await assertFails(getDoc(doc(cl, 'deliverableTypes/dt1')))
+})
+
+// ── client status: revisions now allowed alongside approved ─────────────────
+
+test('client can set revisions on a visible task in their tenant', async () => {
+  const cl = env.authenticatedContext('cl').firestore()
+  await assertSucceeds(updateDoc(doc(cl, 'tasks/t1'), { status: 'revisions', completedAt: null }))
+})
+
+test('client cannot set statuses other than approved/revisions', async () => {
+  const cl = env.authenticatedContext('cl').firestore()
+  await assertFails(updateDoc(doc(cl, 'tasks/t1'), { status: 'in_progress' }))
+  await assertFails(updateDoc(doc(cl, 'tasks/t1'), { status: 'done' }))
+})
+
+// ── org pipeline: managers can update it ────────────────────────────────────
+
+test('manager can update org pipeline field', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertSucceeds(updateDoc(doc(mgr, 'orgs/o_a'), {
+    pipeline: { stages: [{ id: 's1', name: 'Capture', optional: false, clientFacing: false }] },
+  }))
+})
+
+test('manager cannot update billing fields on org', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertFails(updateDoc(doc(mgr, 'orgs/o_a'), { plan: 'agency' }))
+  await assertFails(updateDoc(doc(mgr, 'orgs/o_a'), { seatLimit: 999 }))
+  await assertFails(updateDoc(doc(mgr, 'orgs/o_a'), { deliverableLimit: 999 }))
 })

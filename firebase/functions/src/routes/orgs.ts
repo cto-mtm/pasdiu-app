@@ -89,7 +89,17 @@ orgsRouter.post(
       seatLimit: PLAN_LIMITS.free.seatLimit,
       clientLimit: PLAN_LIMITS.free.clientLimit,
       taskLimit: PLAN_LIMITS.free.taskLimit,
+      deliverableLimit: PLAN_LIMITS.free.deliverableLimit,
       subscriptionStatus: "none",
+      pipeline: {
+        stages: [
+          { id: "s_discovery", name: "Discovery", optional: true, clientFacing: false },
+          { id: "s_capture", name: "Capture", optional: false, clientFacing: false },
+          { id: "s_edit", name: "Edit", optional: false, clientFacing: false },
+          { id: "s_review", name: "Review", optional: false, clientFacing: true },
+          { id: "s_approval", name: "Approval", optional: false, clientFacing: true },
+        ],
+      },
     });
     batch.set(
       db.doc(`users/${user.uid}`),
@@ -109,8 +119,24 @@ orgsRouter.post(
       seats: 1,
       activeClients: 0,
       activeTasks: 0,
+      activeDeliverables: 0,
     });
     await batch.commit();
+
+    // Seed default deliverable types for the new org.
+    const typesBatch = db.batch();
+    const defaultTypes = [
+      { name: "Long-form", weight: 15, order: 0 },
+      { name: "Short", weight: 3, order: 1 },
+      { name: "Clip", weight: 1, order: 2 },
+    ];
+    for (const dt of defaultTypes) {
+      typesBatch.set(db.collection("deliverableTypes").doc(), {
+        orgId: orgRef.id,
+        ...dt,
+      });
+    }
+    await typesBatch.commit();
 
     res.status(201).json({ orgId: orgRef.id });
   })
