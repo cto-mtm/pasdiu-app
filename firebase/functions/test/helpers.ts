@@ -298,6 +298,10 @@ export async function seedDeliverable(orgId: string, id: string, over: Doc = {})
         meta: [],
         createdAt: new Date(),
         deliveredAt: null,
+        approvedBy: "",
+        approvedVia: "",
+        approvedAt: null,
+        approvalNote: "",
         ...over,
       })
     );

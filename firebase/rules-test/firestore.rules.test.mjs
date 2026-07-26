@@ -646,6 +646,10 @@ test('manager can update safe fields on deliverable', async () => {
 test('manager cannot update approval or stageSummary fields on deliverable', async () => {
   const mgr = env.authenticatedContext('mgr').firestore()
   await assertFails(updateDoc(doc(mgr, 'deliverables/d1'), { stageSummary: [{ stageId: 's1', name: 'Edit', status: 'done', assigneeUid: '', assigneeName: '', dueAt: null }] }))
+  await assertFails(updateDoc(doc(mgr, 'deliverables/d1'), { approvedBy: 'hacker' }))
+  await assertFails(updateDoc(doc(mgr, 'deliverables/d1'), { approvedVia: 'portal' }))
+  await assertFails(updateDoc(doc(mgr, 'deliverables/d1'), { approvedAt: new Date() }))
+  await assertFails(updateDoc(doc(mgr, 'deliverables/d1'), { approvalNote: 'forged' }))
 })
 
 test('contractor cannot update deliverables', async () => {
