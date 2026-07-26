@@ -223,6 +223,8 @@ export interface StageSummaryEntry {
   dueAt: Date | null
 }
 
+export type ApprovalVia = 'portal' | 'in_person' | 'external'
+
 export interface Deliverable {
   id: string
   orgId: string
@@ -241,4 +243,8 @@ export interface Deliverable {
   meta: MetaField[]
   createdAt: Date | null
   deliveredAt: Date | null
+  approvedBy: string
+  approvedVia: ApprovalVia | ''
+  approvedAt: Date | null
+  approvalNote: string
 }

@@ -191,6 +191,10 @@ export function mapDeliverable(id: string, d: Record<string, unknown>): Delivera
     meta: (d.meta as MetaField[]) ?? [],
     createdAt: toDate(d.createdAt),
     deliveredAt: toDate(d.deliveredAt),
+    approvedBy: (d.approvedBy as string) ?? '',
+    approvedVia: (d.approvedVia as Deliverable['approvedVia']) ?? '',
+    approvedAt: toDate(d.approvedAt),
+    approvalNote: (d.approvalNote as string) ?? '',
   }
 }
 

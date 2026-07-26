@@ -3,6 +3,19 @@ const en = {
   subtitle: 'Review the latest cuts and approve milestones.',
   empty: 'Nothing to review yet.',
   review: 'Review',
+  awaitingReview: 'awaiting review',
+  approve: 'Approve',
+  approveAll: 'Approve all',
+  approved: 'Approved ✓',
+  approvedLabel: 'Approved',
+  onBehalf: 'on your behalf',
+  bulkApproved: '{count} deliverables approved',
+  requestChanges: 'Request changes',
+  requestChangesTitle: 'Request changes',
+  changesNoteLabel: 'What needs to change?',
+  changesNotePlaceholder: 'Describe what you'd like different…',
+  submitChanges: 'Submit',
+  changesRequested: 'Changes requested',
 }
 
 const es: typeof en = {
@@ -10,6 +23,19 @@ const es: typeof en = {
   subtitle: 'Revisa los últimos cortes y aprueba los hitos.',
   empty: 'Aún no hay nada que revisar.',
   review: 'Revisar',
+  awaitingReview: 'pendientes de revisión',
+  approve: 'Aprobar',
+  approveAll: 'Aprobar todos',
+  approved: 'Aprobado ✓',
+  approvedLabel: 'Aprobado',
+  onBehalf: 'en tu nombre',
+  bulkApproved: '{count} entregables aprobados',
+  requestChanges: 'Solicitar cambios',
+  requestChangesTitle: 'Solicitar cambios',
+  changesNoteLabel: '¿Qué necesita cambiar?',
+  changesNotePlaceholder: 'Describe lo que te gustaría diferente…',
+  submitChanges: 'Enviar',
+  changesRequested: 'Cambios solicitados',
 }
 
 export default { en, es }

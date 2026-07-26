@@ -7,6 +7,7 @@ import { healthRouter } from "./routes/health.js";
 import { billingRouter, billingWebhookHandler } from "./routes/billing.js";
 import { orgsRouter } from "./routes/orgs.js";
 import { deliverablesRouter } from "./routes/deliverables.js";
+import { approvalRouter } from "./routes/approval.js";
 
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
@@ -22,6 +23,9 @@ const VALID_ROUTES = [
   "DELETE /orgs/:orgId/members/:uid",
   "POST /orgs/:orgId/reconcile",
   "POST /orgs/:orgId/deliverables/batch",
+  "POST /orgs/:orgId/deliverables/:deliverableId/approve",
+  "POST /orgs/:orgId/deliverables/:deliverableId/request-changes",
+  "POST /orgs/:orgId/deliverables/bulk-approve",
   "GET /billing/config",
   "POST /billing/checkout",
   "POST /billing/portal",
@@ -51,6 +55,7 @@ app.use("/health", healthRouter);
 app.use("/billing", billingRouter);
 app.use("/orgs", orgsRouter);
 app.use("/orgs", deliverablesRouter);
+app.use("/orgs", approvalRouter);
 
 // ── 404 ─────────────────────────────────────────────────────────────────────
 app.use((req, res) => {
