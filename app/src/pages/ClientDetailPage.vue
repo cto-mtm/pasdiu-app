@@ -80,7 +80,7 @@ const loaded = ref(false)
 async function load() {
   loadError.value = false
   try {
-    await Promise.all([data.loadClients(), data.loadProjectsForClient(clientId.value), data.loadAllTasks()])
+    await Promise.all([data.loadClients(), data.loadProjectsForClient(clientId.value), data.loadAllTasksForClient(clientId.value)])
     loaded.value = true
   } catch {
     loadError.value = true

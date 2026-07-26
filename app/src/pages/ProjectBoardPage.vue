@@ -25,7 +25,8 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import MetaEditor from '../components/MetaEditor.vue'
 import UpsellModal from '../components/UpsellModal.vue'
 import BatchCreateWizard from '../components/BatchCreateWizard.vue'
-import type { MetaField } from '../lib/types'
+import PackageQuota from '../components/PackageQuota.vue'
+import type { MetaField, Package } from '../lib/types'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -190,6 +191,7 @@ function tasksBySubGroup(sgId: string) {
 
 const loadError = ref(false)
 const loaded = ref(false)
+const projectPackages = ref<Package[]>([])
 async function load() {
   loadError.value = false
   try {
@@ -198,10 +200,16 @@ async function load() {
     project.value = p
     if (p) {
       view.value = p.defaultView
+      const { collection: col, getDocs: gd, query: q, where: w } = await import('firebase/firestore')
+      const { db: fireDb } = await import('../lib/firebase')
+      const { mapPackage } = await import('../lib/mappers')
       await Promise.all([
         data.loadProjectBoard(projectId.value),
         data.loadProjectDeliverables(projectId.value),
       ])
+      // Load packages for this project.
+      const pkgSnap = await gd(q(col(fireDb, 'packages'), w('orgId', '==', data.clients[0]?.orgId || ''), w('projectId', '==', projectId.value)))
+      projectPackages.value = pkgSnap.docs.map((d) => mapPackage(d.id, d.data()))
     }
     loaded.value = true
   } catch {
@@ -228,6 +236,8 @@ onMounted(load)
         <InfoTip :text="t('board.viewInfo')" />
       </div>
       <StatusCounts :tasks="tasks" />
+      <!-- Package quota widget -->
+      <PackageQuota v-for="pkg in projectPackages" :key="pkg.id" :pkg="pkg" />
       <dl v-if="project.meta.length" class="flex flex-wrap gap-x-8 gap-y-2">
         <div v-for="(f, i) in project.meta" :key="i">
           <dt class="text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ f.label }}</dt>

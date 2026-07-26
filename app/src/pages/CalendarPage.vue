@@ -3,13 +3,16 @@
 // Read-only in v1: click through to task, deliverable, or session. No drag.
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore'
+import { addDoc, collection, getDocs, query, where, Timestamp } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useDataStore } from '../stores/data'
 import { useAuthStore } from '../stores/auth'
 import { mapRecordingSession, mapTask } from '../lib/mappers'
 import type { RecordingSession, Task } from '../lib/types'
 import BaseButton from '../components/BaseButton.vue'
+import BaseInput from '../components/BaseInput.vue'
+import Modal from '../components/Modal.vue'
+import ModalFooter from '../components/ModalFooter.vue'
 
 const { t, d } = useI18n()
 const data = useDataStore()
@@ -74,6 +77,38 @@ function nextMonth() {
   loadMonth()
 }
 
+// Create session modal.
+const showNewSession = ref(false)
+const sessName = ref('')
+const sessLocation = ref('')
+const sessDate = ref('')
+const sessNotes = ref('')
+
+async function createSession() {
+  if (!sessName.value.trim() || !sessDate.value) return
+  const orgId = auth.activeOrgId
+  if (!orgId) return
+  await addDoc(collection(db, 'sessions'), {
+    orgId,
+    clientId: '',
+    projectId: '',
+    name: sessName.value.trim(),
+    location: sessLocation.value.trim(),
+    date: Timestamp.fromDate(new Date(sessDate.value)),
+    startsAt: null,
+    endsAt: null,
+    taskIds: [],
+    notes: sessNotes.value.trim(),
+    createdAt: Timestamp.now(),
+  })
+  showNewSession.value = false
+  sessName.value = ''
+  sessLocation.value = ''
+  sessDate.value = ''
+  sessNotes.value = ''
+  await loadMonth()
+}
+
 async function loadMonth() {
   const orgId = auth.activeOrgId
   if (!orgId) return
@@ -107,6 +142,7 @@ onMounted(loadMonth)
     <div class="flex items-center justify-between">
       <h1 class="text-2xl font-bold tracking-tight" style="color: var(--text);">{{ t('calendar.title') }}</h1>
       <div class="flex items-center gap-2">
+        <BaseButton class="text-xs" @click="showNewSession = true">+ {{ t('calendar.newSession') }}</BaseButton>
         <button class="rounded px-2 py-1 text-sm" style="color: var(--text-muted);" @click="prevMonth">←</button>
         <span class="text-sm font-medium" style="color: var(--text);">
           {{ currentMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) }}
@@ -183,5 +219,32 @@ onMounted(loadMonth)
         {{ t('calendar.nothingScheduled') }}
       </p>
     </div>
+    <!-- New Session Modal -->
+    <Modal :open="showNewSession" :title="t('calendar.newSession')" @close="showNewSession = false">
+      <form class="space-y-4" @submit.prevent="createSession">
+        <label class="block">
+          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('calendar.sessionName') }}</span>
+          <BaseInput v-model="sessName" autofocus placeholder="e.g. Set 1" />
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('calendar.sessionLocation') }}</span>
+          <BaseInput v-model="sessLocation" placeholder="Studio / address" />
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('calendar.sessionDate') }}</span>
+          <BaseInput v-model="sessDate" type="date" />
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('calendar.sessionNotes') }}</span>
+          <textarea
+            v-model="sessNotes"
+            rows="2"
+            class="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+            style="background: var(--surface-2); color: var(--text); border-color: var(--border);"
+          />
+        </label>
+        <ModalFooter label="Create" :busy="false" @cancel="showNewSession = false" @submit="createSession" />
+      </form>
+    </Modal>
   </section>
 </template>

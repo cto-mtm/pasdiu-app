@@ -331,6 +331,17 @@ export const useDataStore = defineStore('data', () => {
     snap.forEach((d) => upsert(tasks.value, mapTask(d.id, d.data())))
   }
 
+  // Manager-scoped: load ALL tasks for a specific client (no clientVisible filter).
+  async function loadAllTasksForClient(clientId: string): Promise<void> {
+    const orgId = requireOrgId()
+    const snap = await getDocs(query(
+      collection(db, 'tasks'),
+      where('orgId', '==', orgId),
+      where('clientId', '==', clientId),
+    ))
+    snap.forEach((d) => upsert(tasks.value, mapTask(d.id, d.data())))
+  }
+
   // Everything a manager surface needs, in one parallel round-trip.
   async function loadWorkspace(): Promise<void> {
     await Promise.all([loadUsers(), loadClients(), loadAllProjects(), loadAllTasks()])
@@ -684,7 +695,7 @@ export const useDataStore = defineStore('data', () => {
     loadProjectBoard, loadProjectDeliverables, deliverablesForSubGroup,
     subGroupsForProject, tasksForProject, getTask, loadTask,
     loadAssignedTasks, tasksForAssignee,
-    loadAllTasks, loadMoreTasks, loadTasksForClient,
+    loadAllTasks, loadMoreTasks, loadTasksForClient, loadAllTasksForClient,
     loadInvites, createInvite, revokeInvite,
     createClient, createProject, createSubGroup, createTask,
     updateClient, updateProject, updateProjectBrief, updateMember, updateSubGroup, updateTask,
