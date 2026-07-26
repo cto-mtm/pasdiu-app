@@ -89,3 +89,4 @@ export type DeliverableTypeInput = z.infer<typeof DeliverableTypeInputSchema>
 export type BatchCreateDeliverableInput = z.infer<typeof BatchCreateDeliverableSchema>
 export type PackageLineInput = z.infer<typeof PackageLineSchema>
 export type PackageInput = z.infer<typeof PackageSchema>
+export type RecordingSessionInput = z.infer<typeof RecordingSessionSchema>

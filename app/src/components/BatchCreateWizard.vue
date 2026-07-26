@@ -102,6 +102,20 @@ function computeAssigneeSummary(): Record<string, number> {
   return summary
 }
 
+// Limit check: warn in preview if the batch would exceed deliverableLimit.
+const limitWarning = computed(() => {
+  const orgDoc = auth.org
+  const usage = auth.usage
+  if (!orgDoc || !usage) return null
+  const limit = orgDoc.deliverableLimit
+  if (limit === -1) return null // unlimited
+  const current = usage.activeDeliverables
+  if (current + count.value > limit) {
+    return { current, limit, wouldExceed: true }
+  }
+  return null
+})
+
 function memberName(uid: string): string {
   return data.userName(uid)
 }
@@ -254,6 +268,10 @@ watch(() => props.open, (open) => {
 
       <!-- Step 5: Preview -->
       <div v-if="step === 5" class="space-y-3">
+        <!-- Limit warning -->
+        <div v-if="limitWarning" class="rounded-lg border p-3" style="background: var(--accent-amber); border-color: var(--accent-amber); color: #000;">
+          <p class="text-sm font-medium">{{ t('batchCreate.limitWarning', { current: limitWarning.current, limit: limitWarning.limit }) }}</p>
+        </div>
         <div class="rounded-lg border p-3" style="background: var(--surface-2); border-color: var(--border);">
           <dl class="space-y-1 text-sm">
             <div class="flex justify-between">
