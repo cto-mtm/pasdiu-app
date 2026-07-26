@@ -41,7 +41,10 @@ const confirmOpen = ref(false)
 const pendingStatus = ref<TaskStatus | null>(null)
 const pendingDetail = ref('')
 const needsBlockedReason = computed(() => pendingStatus.value === 'blocked')
-const asksDeliveryNote = computed(() => pendingStatus.value === 'delivered')
+const asksDeliveryNote = computed(() =>
+  pendingStatus.value === 'delivered'
+  || (!!props.task.deliverableId && pendingStatus.value !== null && isDoneStatus(pendingStatus.value))
+)
 const confirmDisabled = computed(() => needsBlockedReason.value && !pendingDetail.value.trim())
 
 function open() {

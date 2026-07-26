@@ -22,6 +22,12 @@ const myTasks = computed(() => {
     )
 })
 
+// "Up next": stage tasks in backlog — the previous stage has completed so
+// these are actionable. Separated visually so the contractor sees them as
+// "ready to start" versus tasks already in progress.
+const upNextTasks = computed(() => myTasks.value.filter((tk) => tk.deliverableId && tk.status === 'backlog'))
+const activeTasks = computed(() => myTasks.value.filter((tk) => !(tk.deliverableId && tk.status === 'backlog')))
+
 const loadFailed = ref(false)
 async function load() {
   loadFailed.value = false
@@ -49,8 +55,22 @@ onMounted(load)
 
     <p v-else-if="!myTasks.length" class="mt-8 text-sm" style="color: var(--text-muted);">{{ t('slate.empty') }}</p>
 
-    <div v-else class="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <TaskCard v-for="tk in myTasks" :key="tk.id" :task="tk" />
-    </div>
+    <template v-else>
+      <!-- Up next: stage tasks ready to start -->
+      <div v-if="upNextTasks.length" class="mt-6">
+        <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide" style="color: var(--accent-cyan);">{{ t('slate.upNext') }}</h2>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <TaskCard v-for="tk in upNextTasks" :key="tk.id" :task="tk" />
+        </div>
+      </div>
+
+      <!-- Active work -->
+      <div v-if="activeTasks.length" class="mt-6">
+        <h2 v-if="upNextTasks.length" class="mb-2 text-sm font-semibold uppercase tracking-wide" style="color: var(--text-muted);">{{ t('slate.inProgress') }}</h2>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <TaskCard v-for="tk in activeTasks" :key="tk.id" :task="tk" />
+        </div>
+      </div>
+    </template>
   </section>
 </template>

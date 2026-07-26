@@ -25,10 +25,10 @@ import { i18n } from '../i18n'
 import { useAuthStore } from './auth'
 import { useToastStore } from './toast'
 import { track } from '../lib/analytics'
-import { mapClient, mapInvite, mapMember, mapNote, mapProject, mapSubGroup, mapTask, mapVersion } from '../lib/mappers'
+import { mapClient, mapDeliverable, mapInvite, mapMember, mapNote, mapProject, mapSubGroup, mapTask, mapVersion } from '../lib/mappers'
 import { isDoneStatus } from '../lib/status'
 import type {
-  Client, Invite, Project, Role, SubGroup, Task, TaskStatus, Version, Note, UserProfile, MetaField,
+  Client, Deliverable, Invite, Project, Role, SubGroup, Task, TaskStatus, Version, Note, UserProfile, MetaField,
 } from '../lib/types'
 
 // Run a Firestore write; on failure surface a toast and rethrow so callers can
@@ -70,6 +70,7 @@ export const useDataStore = defineStore('data', () => {
   const projects = ref<Project[]>([])
   const subGroups = ref<SubGroup[]>([])
   const tasks = ref<Task[]>([])
+  const deliverables = ref<Deliverable[]>([])
   const invites = ref<Invite[]>([])
 
   // Memo guards for the full-collection loads (cleared by reset()).
@@ -107,6 +108,7 @@ export const useDataStore = defineStore('data', () => {
     projects.value = []
     subGroups.value = []
     tasks.value = []
+    deliverables.value = []
     invites.value = []
     usersLoaded = false
     clientsLoaded = false
@@ -234,6 +236,23 @@ export const useDataStore = defineStore('data', () => {
     ])
     sgSnap.forEach((d) => upsert(subGroups.value, mapSubGroup(d.id, d.data())))
     tSnap.forEach((d) => upsert(tasks.value, mapTask(d.id, d.data())))
+  }
+
+  // ── Deliverables for a project (board rows — reads stageSummary, no task docs)
+  async function loadProjectDeliverables(projectId: string): Promise<void> {
+    const orgId = requireOrgId()
+    const snap = await getDocs(query(
+      collection(db, 'deliverables'),
+      where('orgId', '==', orgId),
+      where('projectId', '==', projectId),
+    ))
+    // Replace deliverables for this project (don't mix with another project's).
+    deliverables.value = deliverables.value.filter((d) => d.projectId !== projectId)
+    snap.forEach((d) => upsert(deliverables.value, mapDeliverable(d.id, d.data())))
+  }
+
+  function deliverablesForSubGroup(subGroupId: string): Deliverable[] {
+    return deliverables.value.filter((d) => d.subGroupId === subGroupId).sort((a, b) => a.order - b.order)
   }
 
   function subGroupsForProject(projectId: string): SubGroup[] {
@@ -656,13 +675,14 @@ export const useDataStore = defineStore('data', () => {
   }
 
   return {
-    usersById, clients, projects, subGroups, tasks, invites,
+    usersById, clients, projects, subGroups, tasks, deliverables, invites,
     tasksMayHaveMore, projectsMayHaveMore,
     reset, loadWorkspace,
     loadUsers, userName, teamMembers,
     loadClients, loadClient, getClient,
     loadProjectsForClient, loadAllProjects, loadMoreProjects, loadProject, getProject,
-    loadProjectBoard, subGroupsForProject, tasksForProject, getTask, loadTask,
+    loadProjectBoard, loadProjectDeliverables, deliverablesForSubGroup,
+    subGroupsForProject, tasksForProject, getTask, loadTask,
     loadAssignedTasks, tasksForAssignee,
     loadAllTasks, loadMoreTasks, loadTasksForClient,
     loadInvites, createInvite, revokeInvite,

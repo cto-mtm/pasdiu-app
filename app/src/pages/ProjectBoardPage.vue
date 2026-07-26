@@ -166,6 +166,8 @@ async function createTask() {
 const client = computed(() => (project.value ? data.getClient(project.value.clientId) : undefined))
 const subGroups = computed(() => data.subGroupsForProject(projectId.value))
 const tasks = computed(() => data.tasksForProject(projectId.value))
+// Standalone tasks (no deliverable) for the legacy board views.
+const standaloneTasks = computed(() => tasks.value.filter((t) => !t.deliverableId))
 
 // Bulk client visibility (managers): share or hide the whole project's tasks
 // at once — the friendly path now that new tasks default to hidden.
@@ -196,7 +198,10 @@ async function load() {
     project.value = p
     if (p) {
       view.value = p.defaultView
-      await data.loadProjectBoard(projectId.value)
+      await Promise.all([
+        data.loadProjectBoard(projectId.value),
+        data.loadProjectDeliverables(projectId.value),
+      ])
     }
     loaded.value = true
   } catch {
@@ -342,8 +347,36 @@ onMounted(load)
             <dd class="text-sm" style="color: var(--text);">{{ f.value }}</dd>
           </div>
         </dl>
+
+        <!-- Deliverable rows (read from stageSummary — zero task reads) -->
+        <div v-if="data.deliverablesForSubGroup(sg.id).length" class="space-y-2 mb-3">
+          <RouterLink
+            v-for="del in data.deliverablesForSubGroup(sg.id)"
+            :key="del.id"
+            :to="{ name: 'deliverable', params: { deliverableId: del.id } }"
+            class="flex items-center justify-between rounded-xl border p-3 transition-transform hover:-translate-y-0.5"
+            style="background: var(--surface); border-color: var(--border);"
+            :style="{ viewTransitionName: `deliverable-title-${del.id}` }"
+          >
+            <div>
+              <span class="text-sm font-medium" style="color: var(--text);">{{ del.name }}</span>
+              <span class="ml-2 text-xs" style="color: var(--text-muted);">{{ del.status }}</span>
+            </div>
+            <div class="flex items-center gap-1">
+              <span
+                v-for="ss in del.stageSummary"
+                :key="ss.stageId"
+                class="h-2 w-2 rounded-full"
+                :title="`${ss.name}: ${ss.status}`"
+                :style="{ background: statusColor(ss.status) }"
+              />
+            </div>
+          </RouterLink>
+        </div>
+
+        <!-- Standalone tasks (not linked to a deliverable) -->
         <TransitionGroup name="list" tag="div" class="space-y-2">
-          <TaskCard v-for="tk in tasksBySubGroup(sg.id)" :key="tk.id" :task="tk" />
+          <TaskCard v-for="tk in tasksBySubGroup(sg.id).filter(t => !t.deliverableId)" :key="tk.id" :task="tk" />
         </TransitionGroup>
       </div>
     </div>
