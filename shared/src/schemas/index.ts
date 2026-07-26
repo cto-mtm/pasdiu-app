@@ -53,6 +53,21 @@ export const BatchCreateDeliverableSchema = z.object({
   { message: 'Either subGroupId or subGroupName is required' }
 )
 
+export const PackageLineSchema = z.object({
+  typeId: z.string().min(1),
+  quantity: z.number().int().min(1),
+  period: z.enum(['month', 'quarter', 'once']),
+})
+
+export const PackageSchema = z.object({
+  name: z.string().min(1).max(100),
+  clientId: z.string().min(1),
+  projectId: z.string().min(1),
+  lines: z.array(PackageLineSchema).min(1).max(20),
+  startsOn: z.string().optional(),
+  active: z.boolean().optional(),
+})
+
 export type CreateOrgInput = z.infer<typeof CreateOrgSchema>
 export type InviteUserInput = z.infer<typeof InviteUserSchema>
 export type AcceptInviteInput = z.infer<typeof AcceptInviteSchema>
@@ -60,3 +75,5 @@ export type WorkflowStageInput = z.infer<typeof WorkflowStageSchema>
 export type WorkflowPipelineInput = z.infer<typeof WorkflowPipelineSchema>
 export type DeliverableTypeInput = z.infer<typeof DeliverableTypeInputSchema>
 export type BatchCreateDeliverableInput = z.infer<typeof BatchCreateDeliverableSchema>
+export type PackageLineInput = z.infer<typeof PackageLineSchema>
+export type PackageInput = z.infer<typeof PackageSchema>

@@ -5,7 +5,7 @@
 // Normalizers — seed/older docs may lack meta/brief fields, so default them.
 import { FREE_LIMITS } from './plans'
 import type {
-  Client, Deliverable, DeliverableStatus, DeliverableType, Invite, Membership, MetaField, Note, Org, OrgUsage, Plan, Project, Role, StageSummaryEntry, SubGroup, SubscriptionStatus,
+  Client, Deliverable, DeliverableStatus, DeliverableType, Invite, Membership, MetaField, Note, Org, OrgUsage, Package, PackageLine, Plan, Project, Role, StageSummaryEntry, SubGroup, SubscriptionStatus,
   Task, TaskStatus, UserProfile, Version, WorkflowPipeline, WorkflowStage,
 } from './types'
 
@@ -205,5 +205,18 @@ export function mapDeliverableType(id: string, d: Record<string, unknown>): Deli
     name: d.name as string,
     weight: (d.weight as number) ?? 1,
     order: (d.order as number) ?? 0,
+  }
+}
+
+export function mapPackage(id: string, d: Record<string, unknown>): Package {
+  return {
+    id,
+    orgId: d.orgId as string,
+    clientId: d.clientId as string,
+    projectId: d.projectId as string,
+    name: d.name as string,
+    lines: (d.lines as PackageLine[]) ?? [],
+    startsOn: toDate(d.startsOn),
+    active: (d.active as boolean) ?? true,
   }
 }

@@ -225,6 +225,25 @@ export interface StageSummaryEntry {
 
 export type ApprovalVia = 'portal' | 'in_person' | 'external'
 
+export type PackagePeriod = 'month' | 'quarter' | 'once'
+
+export interface PackageLine {
+  typeId: string
+  quantity: number
+  period: PackagePeriod
+}
+
+export interface Package {
+  id: string
+  orgId: string
+  clientId: string
+  projectId: string
+  name: string
+  lines: PackageLine[]
+  startsOn: Date | null
+  active: boolean
+}
+
 export interface Deliverable {
   id: string
   orgId: string

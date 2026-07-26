@@ -1,0 +1,41 @@
+const en = {
+  title: 'Package',
+  delivered: 'delivered',
+  inProgress: 'in progress',
+  planned: 'planned',
+  addPackage: 'Add package',
+  editPackage: 'Edit package',
+  nameLabel: 'Package name',
+  namePlaceholder: 'e.g. 30 Videos / Month',
+  lineType: 'Type',
+  lineQuantity: 'Quantity',
+  linePeriod: 'Period',
+  periodMonth: 'Monthly',
+  periodQuarter: 'Quarterly',
+  periodOnce: 'One-time',
+  addLine: 'Add line',
+  startsOn: 'Starts on',
+  noPackage: 'No package configured for this project.',
+}
+
+const es: typeof en = {
+  title: 'Paquete',
+  delivered: 'entregados',
+  inProgress: 'en progreso',
+  planned: 'planificados',
+  addPackage: 'Agregar paquete',
+  editPackage: 'Editar paquete',
+  nameLabel: 'Nombre del paquete',
+  namePlaceholder: 'p. ej. 30 Videos / Mes',
+  lineType: 'Tipo',
+  lineQuantity: 'Cantidad',
+  linePeriod: 'Periodo',
+  periodMonth: 'Mensual',
+  periodQuarter: 'Trimestral',
+  periodOnce: 'Una vez',
+  addLine: 'Añadir línea',
+  startsOn: 'Comienza el',
+  noPackage: 'No hay paquete configurado para este proyecto.',
+}
+
+export default { en, es }

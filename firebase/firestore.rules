@@ -407,5 +407,19 @@ service cloud.firestore {
       allow update: if isManagerOf(resource.data.orgId) && orgIdUnchanged();
       allow delete: if isManagerOf(resource.data.orgId);
     }
+
+    // ── Packages ──────────────────────────────────────────────────────────────
+    // What the agency sold: line items of type × quantity × period. Attached to
+    // projects (the engagement). Managers write; managers and contractors read
+    // all org packages; clients read only their own (scoped by clientId).
+    match /packages/{packageId} {
+      allow read: if isManagerOf(resource.data.orgId)
+        || isContractorOf(resource.data.orgId)
+        || (isClientOf(resource.data.orgId)
+          && resource.data.clientId == myClientIdIn(resource.data.orgId));
+      allow create: if hasOrgId() && isManagerOf(request.resource.data.orgId);
+      allow update: if isManagerOf(resource.data.orgId) && orgIdUnchanged();
+      allow delete: if isManagerOf(resource.data.orgId);
+    }
   }
 }
