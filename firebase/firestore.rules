@@ -147,7 +147,7 @@ service cloud.firestore {
     match /orgs/{orgId} {
       allow read: if isMemberOf(orgId);
       allow update: if isManagerOf(orgId)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'pipeline'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'pipeline', 'defaultCapacityPointsPerDay'])
         && request.resource.data.name is string
         && request.resource.data.name.size() <= 60;
       allow create, delete: if false; // functions only
@@ -164,7 +164,7 @@ service cloud.firestore {
         allow read: if isMemberOf(orgId);
         allow update: if isManagerOf(orgId)
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['role', 'clientId', 'displayName'])
+            .hasOnly(['role', 'clientId', 'displayName', 'capacityPointsPerDay'])
           && validRole(request.resource.data.role)
           && resource.data.uid != orgData(orgId).ownerUid
           && !(memberId == request.auth.uid
