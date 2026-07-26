@@ -244,6 +244,21 @@ export interface Package {
   active: boolean
 }
 
+export interface RecordingSession {
+  id: string
+  orgId: string
+  clientId: string
+  projectId: string
+  name: string
+  location: string
+  date: Date | null
+  startsAt: Date | null
+  endsAt: Date | null
+  taskIds: string[]
+  notes: string
+  createdAt: Date | null
+}
+
 export interface Deliverable {
   id: string
   orgId: string

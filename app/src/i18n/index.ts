@@ -21,6 +21,7 @@ import invite from './locales/pages/invite'
 import dashboard from './locales/pages/dashboard'
 import client from './locales/pages/client'
 import board from './locales/pages/board'
+import calendar from './locales/pages/calendar'
 import deliverable from './locales/pages/deliverable'
 import iteration from './locales/pages/iteration'
 import slate from './locales/pages/slate'
@@ -58,6 +59,7 @@ const messages = {
     dashboard: dashboard.en,
     client: client.en,
     board: board.en,
+    calendar: calendar.en,
     deliverableDetail: deliverable.en,
     iteration: iteration.en,
     slate: slate.en,
@@ -90,6 +92,7 @@ const messages = {
     dashboard: dashboard.es,
     client: client.es,
     board: board.es,
+    calendar: calendar.es,
     deliverableDetail: deliverable.es,
     iteration: iteration.es,
     slate: slate.es,

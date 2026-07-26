@@ -421,5 +421,16 @@ service cloud.firestore {
       allow update: if isManagerOf(resource.data.orgId) && orgIdUnchanged();
       allow delete: if isManagerOf(resource.data.orgId);
     }
+
+    // ── Recording sessions ────────────────────────────────────────────────────
+    // A booked shoot: date, set/location, and capture tasks being shot there.
+    // Scheduling overlay, not a hierarchy level. Managers write; managers and
+    // contractors read (a contractor needs to see their shoot schedule).
+    match /sessions/{sessionId} {
+      allow read: if isManagerOf(resource.data.orgId) || isContractorOf(resource.data.orgId);
+      allow create: if hasOrgId() && isManagerOf(request.resource.data.orgId);
+      allow update: if isManagerOf(resource.data.orgId) && orgIdUnchanged();
+      allow delete: if isManagerOf(resource.data.orgId);
+    }
   }
 }

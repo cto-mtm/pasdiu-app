@@ -68,6 +68,18 @@ export const PackageSchema = z.object({
   active: z.boolean().optional(),
 })
 
+export const RecordingSessionSchema = z.object({
+  name: z.string().min(1).max(100),
+  clientId: z.string().min(1),
+  projectId: z.string().min(1),
+  location: z.string().max(200).optional(),
+  date: z.string().min(1),
+  startsAt: z.string().optional(),
+  endsAt: z.string().optional(),
+  taskIds: z.array(z.string().min(1)).optional(),
+  notes: z.string().max(2000).optional(),
+})
+
 export type CreateOrgInput = z.infer<typeof CreateOrgSchema>
 export type InviteUserInput = z.infer<typeof InviteUserSchema>
 export type AcceptInviteInput = z.infer<typeof AcceptInviteSchema>

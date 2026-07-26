@@ -39,6 +39,7 @@ const routes: RouteRecordRaw[] = [
   // Boards + task views (managers + contractors)
   { path: '/projects/:projectId', name: 'project', component: () => import('../pages/ProjectBoardPage.vue'), meta: { roles: ['admin', 'pm', 'contractor'] } },
   { path: '/deliverables/:deliverableId', name: 'deliverable', component: () => import('../pages/DeliverableDetailPage.vue'), meta: { roles: ['admin', 'pm', 'contractor'] } },
+  { path: '/calendar', name: 'calendar', component: () => import('../pages/CalendarPage.vue'), meta: { roles: ['admin', 'pm', 'contractor'] } },
   { path: '/tasks/:taskId', name: 'task', component: () => import('../pages/IterationRoomPage.vue'), meta: { roles: ['admin', 'pm', 'contractor', 'client'] } },
 
   // Contractor + client surfaces
