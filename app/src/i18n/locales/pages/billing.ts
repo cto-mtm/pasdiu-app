@@ -16,6 +16,10 @@ const en = {
   billedAnnually: 'Billed annually.',
   manage: 'Manage billing',
   checkoutSuccess: 'Payment successful — your plan is being updated.',
+  // 503 price_unavailable: the plan has no price in the Stripe catalog, so
+  // there is nothing for the customer to retry. Distinct from a generic
+  // failure so support hears "this plan" instead of "checkout is broken".
+  checkoutUnavailable: "This plan can't be purchased right now. Please contact support.",
   // Entitlement gates: shown by UpsellModal when a create/invite hits a plan
   // limit, parameterized by the gate that fired.
   upsellTitle: 'Upgrade your plan',
@@ -54,6 +58,7 @@ const es: typeof en = {
   billedAnnually: 'Con facturación anual.',
   manage: 'Gestionar facturación',
   checkoutSuccess: 'Pago realizado: tu plan se está actualizando.',
+  checkoutUnavailable: 'Este plan no se puede contratar en este momento. Contacta con soporte.',
   upsellTitle: 'Mejora tu plan',
   gateClients: 'Has alcanzado el límite de {limit} clientes de tu plan. Mejora tu plan para añadir más clientes.',
   gateTasks: 'Has alcanzado el límite de {limit} tareas de tu plan. Mejora tu plan para añadir más tareas.',

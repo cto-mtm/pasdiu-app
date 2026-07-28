@@ -26,6 +26,7 @@ import {
   stripeEnv,
   stripeSignature,
 } from "./helpers.js";
+import { PRICE_LOOKUP_KEYS, priceIdFor } from "../src/helpers/stripe.js";
 
 const FAKE_ENV = {
   STRIPE_SECRET_KEY: "sk_test_offline_fake",
@@ -38,6 +39,42 @@ const FAKE_ENV = {
 
 beforeEach(async () => {
   await clearFirestore();
+});
+
+// ── Price resolution (offline paths only — no Stripe catalog call) ─────────
+
+describe("price resolution", () => {
+  it("maps every plan + interval slot to a distinct lookup key", () => {
+    // These four strings are the contract with the Stripe catalog: they must
+    // match the keys assigned by functions/stripe-setup.mjs, and a duplicate
+    // would silently point two plans at one price.
+    expect(PRICE_LOOKUP_KEYS).toEqual({
+      studio: { month: "studio_monthly", year: "studio_annual" },
+      agency: { month: "agency_monthly", year: "agency_annual" },
+    });
+    const keys = Object.values(PRICE_LOOKUP_KEYS).flatMap((byInterval) => Object.values(byInterval));
+    expect(new Set(keys).size).toBe(4);
+  });
+
+  it("prefers an explicitly pinned STRIPE_PRICE_* env var over any catalog lookup", async () => {
+    const restore = stripeEnv({ ...FAKE_ENV });
+    try {
+      // Env hit returns before Stripe is ever contacted — so this stays offline.
+      await expect(priceIdFor("studio", "month")).resolves.toBe("price_studio_m");
+      await expect(priceIdFor("agency", "year")).resolves.toBe("price_agency_y");
+    } finally {
+      restore();
+    }
+  });
+
+  it("resolves to an empty price id when billing is disabled", async () => {
+    const restore = stripeEnv({});
+    try {
+      await expect(priceIdFor("studio", "month")).resolves.toBe("");
+    } finally {
+      restore();
+    }
+  });
 });
 
 // ── Billing disabled (no Stripe env — the default in this suite) ───────────

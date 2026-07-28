@@ -13,7 +13,7 @@ const en = {
   requestChanges: 'Request changes',
   requestChangesTitle: 'Request changes',
   changesNoteLabel: 'What needs to change?',
-  changesNotePlaceholder: 'Describe what you'd like different…',
+  changesNotePlaceholder: 'Describe what you\'d like different…',
   submitChanges: 'Submit',
   changesRequested: 'Changes requested',
 }

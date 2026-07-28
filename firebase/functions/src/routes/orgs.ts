@@ -65,6 +65,55 @@ orgsRouter.get(
 
 orgsRouter.use(requireAuth);
 
+// GET /orgs/my-invites — returns all pending, non-expired invites addressed
+// to the authenticated user's email. Used at login to surface invites without
+// requiring the user to have the invite link. Collection-group query on
+// `invites` — needs a composite index (email ASC, status ASC).
+orgsRouter.get(
+  "/my-invites",
+  asyncHandler(async (req, res) => {
+    const user = userOf(req);
+    const email = emailOf(user);
+    const db = getFirestore();
+    const snaps = await db
+      .collectionGroup("invites")
+      .where("email", "==", email)
+      .where("status", "==", "pending")
+      .get();
+
+    const invites: Array<{
+      orgId: string;
+      inviteId: string;
+      orgName: string;
+      role: string;
+    }> = [];
+
+    for (const doc of snaps.docs) {
+      // Path: orgs/{orgId}/invites/{inviteId}
+      const orgId = doc.ref.parent.parent?.id;
+      if (!orgId) continue;
+      const data = doc.data();
+      if (inviteExpired(data)) continue;
+
+      // Resolve org name (prefer denormalized, else read org doc).
+      let orgName = typeof data.orgName === "string" ? data.orgName : "";
+      if (!orgName) {
+        const orgSnap = await db.doc(`orgs/${orgId}`).get();
+        orgName = (orgSnap.get("name") as string) || orgId;
+      }
+
+      invites.push({
+        orgId,
+        inviteId: doc.id,
+        orgName,
+        role: typeof data.role === "string" ? data.role : "",
+      });
+    }
+
+    res.json({ invites });
+  })
+);
+
 // POST /orgs
 orgsRouter.post(
   "/",
@@ -293,6 +342,7 @@ orgsRouter.post(
         invitedBy: invite.invitedBy ?? null,
       };
       if (invite.clientId) member.clientId = invite.clientId;
+      if (invite.title) member.title = invite.title;
       tx.set(memberRef, member);
       tx.update(usageRef, { seats: FieldValue.increment(1) });
       tx.update(inviteRef, { status: "accepted" });

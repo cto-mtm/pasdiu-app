@@ -156,7 +156,9 @@ async function checkout(plan: TierId): Promise<void> {
   await run(async () => {
     const res = await createCheckoutApi(auth.activeOrgId ?? '', plan, interval.value)
     if (!res.ok) {
-      toast.error(t(res.error.key, res.error.params ?? {}))
+      // No price configured for this plan+interval — retrying cannot help.
+      const key = res.error.code === 'price_unavailable' ? 'billing.checkoutUnavailable' : res.error.key
+      toast.error(t(key, res.error.params ?? {}))
       return
     }
     await openExternal(res.data.url)

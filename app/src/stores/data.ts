@@ -255,6 +255,12 @@ export const useDataStore = defineStore('data', () => {
     return deliverables.value.filter((d) => d.subGroupId === subGroupId).sort((a, b) => a.order - b.order)
   }
 
+  async function updateDeliverable(id: string, patch: Partial<Pick<Deliverable, 'name' | 'meta' | 'order' | 'clientVisible' | 'status'>>): Promise<void> {
+    await guarded(() => updateDoc(doc(db, 'deliverables', id), patch))
+    const local = deliverables.value.find((d) => d.id === id)
+    if (local) Object.assign(local, patch)
+  }
+
   function subGroupsForProject(projectId: string): SubGroup[] {
     return subGroups.value.filter((s) => s.projectId === projectId).sort((a, b) => a.order - b.order)
   }
@@ -367,7 +373,7 @@ export const useDataStore = defineStore('data', () => {
     upsert(clients.value, c)
     return c
   }
-  async function createProject(clientId: string, name: string, defaultView: 'kanban' | 'list'): Promise<Project> {
+  async function createProject(clientId: string, name: string, defaultView: 'kanban' | 'list' | 'deliverables'): Promise<Project> {
     const orgId = requireOrgId()
     const brief = { brandGuidelinesUrl: '', sopUrl: '', links: [], fields: [] as MetaField[] }
     const meta: MetaField[] = []
@@ -394,7 +400,7 @@ export const useDataStore = defineStore('data', () => {
   // Edits a member of the ACTIVE org (orgs/{orgId}/members/{uid}) — managers
   // may change role/clientId/displayName; membership create/delete goes
   // through the HTTP API.
-  async function updateMember(uid: string, patch: Partial<Pick<UserProfile, 'displayName' | 'role' | 'clientId'>>): Promise<void> {
+  async function updateMember(uid: string, patch: Partial<Pick<UserProfile, 'displayName' | 'role' | 'clientId' | 'title'>>): Promise<void> {
     const orgId = requireOrgId()
     await guarded(() => updateDoc(doc(db, 'orgs', orgId, 'members', uid), patch))
     const current = usersById.value[uid]
@@ -411,7 +417,7 @@ export const useDataStore = defineStore('data', () => {
     ))
     invites.value = snap.docs.map((d) => mapInvite(d.id, d.data()))
   }
-  async function createInvite(input: { email: string; role: Role; clientId?: string }): Promise<Invite> {
+  async function createInvite(input: { email: string; role: Role; clientId?: string; title?: string }): Promise<Invite> {
     const orgId = requireOrgId()
     const email = input.email.toLowerCase() // rules require a lowercased email
     const invitedBy = useAuthStore().profile?.uid ?? ''
@@ -424,6 +430,7 @@ export const useDataStore = defineStore('data', () => {
       email,
       role: input.role,
       ...(input.clientId ? { clientId: input.clientId } : {}),
+      ...(input.title ? { title: input.title } : {}),
       status: 'pending',
       createdAt: serverTimestamp(),
       invitedBy,
@@ -692,7 +699,7 @@ export const useDataStore = defineStore('data', () => {
     loadUsers, userName, teamMembers,
     loadClients, loadClient, getClient,
     loadProjectsForClient, loadAllProjects, loadMoreProjects, loadProject, getProject,
-    loadProjectBoard, loadProjectDeliverables, deliverablesForSubGroup,
+    loadProjectBoard, loadProjectDeliverables, deliverablesForSubGroup, updateDeliverable,
     subGroupsForProject, tasksForProject, getTask, loadTask,
     loadAssignedTasks, tasksForAssignee,
     loadAllTasks, loadMoreTasks, loadTasksForClient, loadAllTasksForClient,

@@ -24,7 +24,8 @@ import {
 } from 'firebase/firestore'
 import { FirebaseError } from 'firebase/app'
 import { auth, db } from '../lib/firebase'
-import { acceptInviteApi, createOrgApi, renameOrgApi } from '../lib/api'
+import { acceptInviteApi, createOrgApi, fetchMyInvitesApi, renameOrgApi } from '../lib/api'
+import type { PendingInvite } from '../lib/api'
 import { identify, resetAnalytics, track } from '../lib/analytics'
 import { mapMember, mapMembership, mapOrg, mapUsage } from '../lib/mappers'
 import { i18n } from '../i18n'
@@ -78,6 +79,10 @@ export const useAuthStore = defineStore('auth', () => {
   // (gates fail open; rules are the backstop).
   const usage = ref<OrgUsage | null>(null)
   const error = ref<string | null>(null)
+
+  // Pending invites addressed to this account's email (checked at login).
+  // Consumed by the welcome/onboarding page and by any in-app banner.
+  const pendingInvites = ref<PendingInvite[]>([])
 
   const isAuthed = computed(() => identity.value !== null)
 
@@ -259,6 +264,37 @@ export const useAuthStore = defineStore('auth', () => {
     await router.replace(homeRoute())
   }
 
+  // ── Pending-invite auto-accept ───────────────────────────────────
+  // After session bootstrap, check if the user has pending invitations and
+  // accept them automatically. The manager already authorized the invite —
+  // making the user click "accept" again adds friction for no security gain.
+  // Non-blocking: a failure is silent — the invite link still works as fallback.
+  async function checkAndAcceptInvites(): Promise<void> {
+    try {
+      const res = await fetchMyInvitesApi()
+      if (!res.ok || res.data.invites.length === 0) return
+      pendingInvites.value = res.data.invites
+
+      // Accept all pending invites in parallel.
+      const results = await Promise.allSettled(
+        res.data.invites.map((inv) => acceptInviteApi(inv.orgId, inv.inviteId)),
+      )
+
+      // If at least one succeeded, refresh memberships so the user lands in
+      // the workspace instead of the onboarding screen.
+      const anyAccepted = results.some(
+        (r) => r.status === 'fulfilled' && r.value.ok,
+      )
+      if (anyAccepted) {
+        await refreshMemberships()
+        pendingInvites.value = []
+        track('invite_auto_accepted', { count: results.filter((r) => r.status === 'fulfilled' && r.value.ok).length })
+      }
+    } catch {
+      // Silent — not critical path. The user can still use the invite link.
+    }
+  }
+
   // ── Session bootstrap ───────────────────────────────────────────
   // Verified sign-in: record identity, upsert the global users/{uid} doc, then
   // load memberships and attach the active-org member listener. Zero
@@ -277,6 +313,16 @@ export const useAuthStore = defineStore('auth', () => {
         { merge: true },
       )
       await refreshMemberships()
+      // If the user has no memberships yet, they might have pending invites
+      // (e.g. email never arrived). Await auto-accept so the router guard
+      // sees the membership BEFORE redirecting to /welcome.
+      // For users already in an org, fire-and-forget (new invites from other
+      // orgs get picked up without blocking the landing).
+      if (memberships.value.length === 0) {
+        await checkAndAcceptInvites()
+      } else {
+        void checkAndAcceptInvites()
+      }
       // Analytics identity = uid only (never email/name — see lib/analytics).
       // Here rather than in the login functions so restored sessions count too.
       identify(user.uid)
@@ -298,6 +344,7 @@ export const useAuthStore = defineStore('auth', () => {
     liveMember.value = null
     org.value = null
     usage.value = null
+    pendingInvites.value = []
     // No cross-account bleed: gone means a clean data store.
     useDataStore().reset()
   }
@@ -508,6 +555,7 @@ export const useAuthStore = defineStore('auth', () => {
     org,
     usage,
     needsWorkspace,
+    pendingInvites,
     refreshMemberships,
     setActiveOrg,
     login,

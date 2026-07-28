@@ -31,9 +31,15 @@ export async function sendInviteEmailFor(
   inviteId: string,
   invite: InviteDocData
 ): Promise<boolean> {
-  if (invite.status !== "pending") return false;
+  if (invite.status !== "pending") {
+    logger.warn("invite email skipped: status is not pending", { orgId, inviteId, status: invite.status });
+    return false;
+  }
   const to = typeof invite.email === "string" ? invite.email : "";
-  if (!to) return false;
+  if (!to) {
+    logger.warn("invite email skipped: no valid email address on invite doc", { orgId, inviteId });
+    return false;
+  }
 
   // Deployed Functions (K_SERVICE is Cloud Run's marker — absent in the
   // emulator and in tests) with no APP_URL would email a dead
@@ -41,7 +47,11 @@ export async function sendInviteEmailFor(
   // log loudly instead — managers can still copy the link, and re-creating
   // (or resending) the invite after setting APP_URL sends normally.
   if (process.env.K_SERVICE && !process.env.APP_URL) {
-    logger.error("invite email skipped: APP_URL is not set in production", { orgId, inviteId });
+    logger.error("invite email skipped: APP_URL is not set in production", {
+      orgId,
+      inviteId,
+      K_SERVICE: process.env.K_SERVICE,
+    });
     return false;
   }
 
@@ -57,6 +67,16 @@ export async function sendInviteEmailFor(
   // the route is the app's invite-accept page (see app/src/router).
   const inviteUrl = `${appUrl()}/invite/${orgId}/${inviteId}`;
 
+  logger.info("invite email rendering", {
+    orgId,
+    inviteId,
+    to,
+    orgName,
+    inviteUrl,
+    locale: invite.locale,
+    appUrlValue: appUrl(),
+  });
+
   const rendered = renderInviteEmail({
     orgName,
     role: typeof invite.role === "string" ? invite.role : "",
@@ -64,5 +84,6 @@ export async function sendInviteEmailFor(
     locale: typeof invite.locale === "string" ? invite.locale : undefined,
   });
   await queueMail(db, `invite-${orgId}-${inviteId}`, { to, ...rendered });
+  logger.info("invite email queued successfully", { orgId, inviteId, to, mailDocId: `invite-${orgId}-${inviteId}` });
   return true;
 }

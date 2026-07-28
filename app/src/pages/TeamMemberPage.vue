@@ -37,6 +37,7 @@ const completed = computed(() => assigned.value.filter((tk) => isDoneStatus(tk.s
 const showEdit = ref(false)
 const editName = ref('')
 const editRole = ref<Role>('contractor')
+const editTitle = ref('')
 const editClientId = ref('')
 const clientError = ref(false)
 const { busy, run } = useBusy()
@@ -45,6 +46,7 @@ function openEdit() {
   if (!member.value) return
   editName.value = member.value.displayName
   editRole.value = member.value.role
+  editTitle.value = member.value.title ?? ''
   editClientId.value = member.value.clientId ?? ''
   clientError.value = false
   showEdit.value = true
@@ -59,6 +61,7 @@ async function saveEdit() {
       displayName: editName.value.trim(),
       role: editRole.value,
       ...(editRole.value === 'client' ? { clientId: editClientId.value } : {}),
+      ...(editRole.value !== 'client' ? { title: editTitle.value.trim() } : {}),
     })
     showEdit.value = false
   })
@@ -116,7 +119,9 @@ onMounted(load)
         </div>
         <div>
           <h1 class="text-2xl font-bold tracking-tight" style="color: var(--text);">{{ member.displayName }}</h1>
-          <p class="text-sm" style="color: var(--text-muted);">{{ t('roles.' + member.role) }} · {{ member.email }}</p>
+          <p class="text-sm" style="color: var(--text-muted);">
+            {{ t('roles.' + member.role) }}<template v-if="member.title"> · {{ member.title }}</template> · {{ member.email }}
+          </p>
         </div>
       </div>
       <BaseButton v-if="auth.isManager" @click="openEdit">{{ t('team.editMember') }}</BaseButton>
@@ -169,6 +174,10 @@ onMounted(load)
           <BaseSelect v-model="editRole">
             <option v-for="r in ROLES" :key="r" :value="r">{{ t('roles.' + r) }}</option>
           </BaseSelect>
+        </label>
+        <label v-if="editRole !== 'client'" class="block">
+          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('team.titleLabel') }}</span>
+          <BaseInput v-model="editTitle" :placeholder="t('team.titlePlaceholder')" />
         </label>
         <label v-if="editRole === 'client'" class="block">
           <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('team.clientLabel') }}</span>

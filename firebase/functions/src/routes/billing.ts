@@ -92,6 +92,12 @@ billingRouter.post(
     ]);
     if (!orgSnap.exists) throw new ApiError(404, "Org not found");
 
+    // Resolve the price BEFORE touching Stripe customers: an unresolved slot
+    // used to reach Checkout as `price: ""` and surface as an opaque Stripe
+    // error, after having already created a customer for a doomed session.
+    const priceId = await priceIdFor(plan, interval);
+    if (!priceId) throw new ApiError(503, "price_unavailable");
+
     const stripe = getStripe();
     let customerId = orgSnap.get("stripeCustomerId");
     if (typeof customerId !== "string" || !customerId) {
@@ -109,7 +115,7 @@ billingRouter.post(
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
-      line_items: [{ price: await priceIdFor(plan, interval), quantity }],
+      line_items: [{ price: priceId, quantity }],
       subscription_data: { metadata: { orgId, plan } },
       metadata: { orgId, plan },
       success_url: `${returnOrigin(req)}/settings?billing=success`,

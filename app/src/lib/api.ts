@@ -108,6 +108,19 @@ export function acceptInviteApi(orgId: string, inviteId: string): Promise<ApiRes
   return apiFetch<{ orgId: string }>(`/orgs/${orgId}/invites/${inviteId}/accept`, { method: 'POST' })
 }
 
+// Pending invites addressed to the authenticated user's email — used at login
+// to surface invitations the user hasn't seen (e.g. never received the email).
+export interface PendingInvite {
+  orgId: string
+  inviteId: string
+  orgName: string
+  role: Role
+}
+
+export function fetchMyInvitesApi(): Promise<ApiResult<{ invites: PendingInvite[] }>> {
+  return apiFetch<{ invites: PendingInvite[] }>('/orgs/my-invites')
+}
+
 export function removeMemberApi(orgId: string, uid: string): Promise<ApiResult<null>> {
   return apiFetch<null>(`/orgs/${orgId}/members/${uid}`, { method: 'DELETE' })
 }

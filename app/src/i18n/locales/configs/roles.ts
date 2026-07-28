@@ -1,14 +1,14 @@
 const en = {
   admin: 'Admin',
   pm: 'Project Manager',
-  contractor: 'Editor',
+  contractor: 'Crew', // Intentionally untranslated — production industry term
   client: 'Client',
 }
 
 const es: typeof en = {
   admin: 'Administrador',
   pm: 'Gestor de proyecto',
-  contractor: 'Editor',
+  contractor: 'Crew', // Kept in English — universal in video/film production
   client: 'Cliente',
 }
 

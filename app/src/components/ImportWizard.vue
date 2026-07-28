@@ -173,7 +173,7 @@ async function runImport() {
         if (entity.value === 'clients') {
           await data.createClient(pl.name as string)
         } else if (entity.value === 'projects') {
-          await data.createProject(pl.clientId as string, pl.name as string, pl.view as 'kanban' | 'list')
+          await data.createProject(pl.clientId as string, pl.name as string, pl.view as 'kanban' | 'list' | 'deliverables')
         } else {
           const subGroupId = await ensureSubGroup(pl.projectId as string, pl.subGroup as string)
           await data.createTask({

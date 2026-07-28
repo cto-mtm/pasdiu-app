@@ -71,6 +71,7 @@ export interface Membership {
   orgName: string
   role: Role
   clientId?: string
+  title?: string
 }
 
 export interface UserProfile {
@@ -79,6 +80,7 @@ export interface UserProfile {
   email: string
   role: Role
   clientId?: string
+  title?: string
 }
 
 export interface Invite {
@@ -137,7 +139,7 @@ export interface Project {
   orgId: string
   clientId: string
   name: string
-  defaultView: 'kanban' | 'list'
+  defaultView: 'kanban' | 'list' | 'deliverables'
   brief: ProjectBrief
   meta: MetaField[]
 }

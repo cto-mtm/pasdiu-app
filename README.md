@@ -131,12 +131,26 @@ return 503. To develop against Stripe **test mode**:
    **Agency** — each with a **monthly** and an **annual** per-seat (licensed)
    recurring price. Suggested amounts: Studio $12/mo or $120/yr per seat;
    Agency $25/mo or $252/yr per seat (the UI displays $10 and $21 per-seat/mo
-   for annual).
-2. `cp firebase/functions/.env.example firebase/functions/.env` and fill in
-   `STRIPE_SECRET_KEY` plus the four `STRIPE_PRICE_*` price IDs.
-   firebase-functions v2 loads `functions/.env` automatically — restart the
-   emulators after editing it.
-3. Forward webhooks to the emulated function with the Stripe CLI:
+   for annual). Two products, four prices — *not* one product per interval.
+2. Give each price its **lookup key** — `studio_monthly`, `studio_annual`,
+   `agency_monthly`, `agency_annual`. This is how the API finds prices, and it
+   is the only mapping that survives renaming a product or replacing a price:
+
+   ```bash
+   cd firebase/functions && STRIPE_SECRET_KEY=sk_test_… node stripe-setup.mjs
+   ```
+
+   Run with no flags it just reports what the API resolves (and flags archived
+   or ambiguous prices); add `--apply studio_monthly=price_… …` to assign the
+   keys. Do it once per account — test and live catalogs are separate. With no
+   lookup key the API falls back to guessing from the product name, which is
+   ambiguous as soon as a plan+interval has more than one live price.
+3. `cp firebase/functions/.env.example firebase/functions/.env` and fill in
+   `STRIPE_SECRET_KEY`. firebase-functions v2 loads `functions/.env`
+   automatically — restart the emulators after editing it. The four
+   `STRIPE_PRICE_*` vars are optional: set one only to pin a slot to a
+   specific price id, overriding the lookup key.
+4. Forward webhooks to the emulated function with the Stripe CLI:
 
    ```bash
    stripe listen --forward-to http://localhost:5001/demo-app/us-central1/api/billing/webhook
@@ -144,7 +158,7 @@ return 503. To develop against Stripe **test mode**:
 
    Copy the `whsec_…` it prints into `STRIPE_WEBHOOK_SECRET` in
    `functions/.env` (and restart the emulators once more).
-4. Upgrade flow: `POST /billing/checkout` (manager-only) returns a Checkout
+5. Upgrade flow: `POST /billing/checkout` (manager-only) returns a Checkout
    URL; paying with a test card (`4242 4242 4242 4242`) fires
    `checkout.session.completed`, and the webhook writes the org's billing
    block (`plan`, limits, `subscriptionStatus`, `currentPeriodEnd`).
@@ -153,8 +167,13 @@ return 503. To develop against Stripe **test mode**:
    `billingEvents/{eventId}` marker docs (functions-only collection).
 
 In production put `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` in Secret
-Manager, set the live price IDs + `APP_URL`, and point a Stripe webhook
-endpoint at `https://us-central1-<project>.cloudfunctions.net/api/billing/webhook`.
+Manager, assign the same four lookup keys in the **live** catalog, set
+`APP_URL`, and point a Stripe webhook endpoint at
+`https://us-central1-<project>.cloudfunctions.net/api/billing/webhook`.
+
+Checkout returns **503 `price_unavailable`** when a plan+interval resolves to
+no price — an unassigned lookup key, or a price whose product was archived.
+`node stripe-setup.mjs` against that account's key says which slot is empty.
 
 ### Usage reconciliation
 

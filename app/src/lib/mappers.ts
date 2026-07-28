@@ -46,7 +46,7 @@ export function mapProject(id: string, d: Record<string, unknown>): Project {
     orgId: d.orgId as string,
     clientId: d.clientId as string,
     name: d.name as string,
-    defaultView: (d.defaultView as 'kanban' | 'list') ?? 'kanban',
+    defaultView: (d.defaultView as 'kanban' | 'list' | 'deliverables') ?? 'kanban',
     brief: {
       brandGuidelinesUrl: (b.brandGuidelinesUrl as string) ?? '',
       sopUrl: (b.sopUrl as string) ?? '',
@@ -132,6 +132,7 @@ export function mapMember(id: string, d: Record<string, unknown>): UserProfile {
     email: d.email as string,
     role: d.role as Role,
     clientId: d.clientId as string | undefined,
+    title: (d.title as string) || undefined,
   }
 }
 
@@ -143,6 +144,7 @@ export function mapMembership(d: Record<string, unknown>): Membership {
     orgName: (d.orgName as string) ?? '',
     role: d.role as Role,
     clientId: d.clientId as string | undefined,
+    title: (d.title as string) || undefined,
   }
 }
 

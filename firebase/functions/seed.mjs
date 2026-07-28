@@ -113,6 +113,7 @@ async function seedOrgs() {
       ownerUid: org.ownerUid,
       ...org.billing,
       pipeline: DEFAULT_PIPELINE,
+      defaultCapacityPointsPerDay: 10,
     });
     for (const m of org.members) {
       const u = userByUid(m.uid);
@@ -124,6 +125,8 @@ async function seedOrgs() {
         email: u.email,
         role: m.role,
         joinedAt: new Date(),
+        // Capacity points: contractors/pms produce; admins and clients don't.
+        capacityPointsPerDay: (m.role === "contractor" || m.role === "pm") ? 10 : 0,
       };
       if (m.clientId) member.clientId = m.clientId;
       batch.set(db.doc(`orgs/${org.id}/members/${m.uid}`), member);
@@ -224,11 +227,85 @@ const DEFAULT_STAGES = [
 // Demo deliverables — a few in Pasdiu Studio to demonstrate the model.
 // Each deliverable has stage-tasks that link back via deliverableId + stageId.
 const DELIVERABLES = [
-  { id: "del_1", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 01 — Teaser", status: "active", clientVisible: true, order: 0 },
-  { id: "del_2", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 02 — Product hero", status: "active", clientVisible: true, order: 1 },
-  { id: "del_3", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 03 — Testimonial", status: "active", clientVisible: false, order: 2 },
-  { id: "del_4", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_yt", subGroupName: "YouTube Cutdowns", typeId: "dt_longform_pasdiu", name: "60s Cutdown", status: "delivered", clientVisible: true, order: 0 },
-  { id: "del_5", orgId: "o_northlight", clientId: "c_beacon", projectId: "p_roast", subGroupId: "sg_spots", subGroupName: "Launch Spots", typeId: "dt_short_north", name: "Spot 01 — Roast reveal", status: "active", clientVisible: true, order: 0 },
+  { id: "del_1", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 01 — Teaser", status: "active", clientVisible: true, order: 0, versions: 2 },
+  { id: "del_2", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 02 — Product hero", status: "active", clientVisible: true, order: 1, versions: 3 },
+  { id: "del_3", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 03 — Testimonial", status: "active", clientVisible: false, order: 2, versions: 0 },
+  { id: "del_4", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_yt", subGroupName: "YouTube Cutdowns", typeId: "dt_longform_pasdiu", name: "60s Cutdown", status: "delivered", clientVisible: true, order: 0, versions: 2, approvedBy: "u_client", approvedVia: "portal", approvalNote: "Looks great — approved!" },
+  { id: "del_5", orgId: "o_northlight", clientId: "c_beacon", projectId: "p_roast", subGroupId: "sg_spots", subGroupName: "Launch Spots", typeId: "dt_short_north", name: "Spot 01 — Roast reveal", status: "active", clientVisible: true, order: 0, versions: 1 },
+];
+
+// ── Packages — what the agency sold to the client (type × quantity × period).
+// The PackageQuota widget on the project board renders these.
+const PACKAGES = [
+  {
+    id: "pkg_summer",
+    orgId: "o_pasdiu",
+    clientId: "c_aurora",
+    projectId: "p_summer",
+    name: "Summer Launch — Monthly",
+    lines: [
+      { typeId: "dt_short_pasdiu", quantity: 8, period: "month" },
+      { typeId: "dt_longform_pasdiu", quantity: 2, period: "month" },
+    ],
+    startsOn: days(-30),
+    active: true,
+  },
+  {
+    id: "pkg_q3",
+    orgId: "o_pasdiu",
+    clientId: "c_northwind",
+    projectId: "p_q3",
+    name: "Q3 Campaign — Quarterly",
+    lines: [
+      { typeId: "dt_short_pasdiu", quantity: 12, period: "quarter" },
+      { typeId: "dt_clip_pasdiu", quantity: 20, period: "quarter" },
+    ],
+    startsOn: days(-15),
+    active: true,
+  },
+];
+
+// ── Recording sessions — booked shoots that appear on the CalendarPage.
+const SESSIONS = [
+  {
+    id: "ses_1",
+    orgId: "o_pasdiu",
+    clientId: "c_aurora",
+    projectId: "p_summer",
+    name: "Summer Reels — Studio A",
+    location: "Studio A, Downtown",
+    date: days(3),
+    startsAt: days(3),
+    endsAt: days(3),
+    taskIds: ["t1", "t2"],
+    notes: "Bring extra lighting kits. Talent arrives at 9 AM.",
+  },
+  {
+    id: "ses_2",
+    orgId: "o_pasdiu",
+    clientId: "c_northwind",
+    projectId: "p_q3",
+    name: "TikTok batch shoot",
+    location: "Northwind HQ rooftop",
+    date: days(5),
+    startsAt: days(5),
+    endsAt: days(5),
+    taskIds: ["t8", "t9"],
+    notes: "Confirm props delivery the day before.",
+  },
+  {
+    id: "ses_3",
+    orgId: "o_northlight",
+    clientId: "c_beacon",
+    projectId: "p_roast",
+    name: "Roast reveal on-location",
+    location: "Beacon Coffee flagship, 4th St.",
+    date: days(7),
+    startsAt: days(7),
+    endsAt: days(7),
+    taskIds: ["t11"],
+    notes: "Barista consent forms needed.",
+  },
 ];
 
 async function seedData() {
@@ -279,7 +356,7 @@ async function seedData() {
   }
   await dtBatch.commit();
 
-  // Deliverables (with stage snapshots and initial stageSummary)
+  // Deliverables (with stage snapshots, approval fields, and initial stageSummary)
   const delBatch = db.batch();
   for (const d of DELIVERABLES) {
     delBatch.set(db.doc(`deliverables/${d.id}`), {
@@ -299,11 +376,114 @@ async function seedData() {
       meta: [],
       createdAt: days(-10),
       deliveredAt: d.status === "delivered" ? days(-1) : null,
+      // Approval attribution — populated on delivered/approved deliverables.
+      approvedBy: d.approvedBy ?? "",
+      approvedVia: d.approvedVia ?? "",
+      approvedAt: d.approvedBy ? days(-1) : null,
+      approvalNote: d.approvalNote ?? "",
     });
   }
   await delBatch.commit();
 
-  // Versions + threaded notes (separate writes; small volume).
+  // Deliverable versions + notes (mirrors the task pattern above).
+  for (const d of DELIVERABLES) {
+    for (let v = 1; v <= (d.versions || 0); v++) {
+      const vid = `v${v}`;
+      await db.doc(`deliverables/${d.id}/versions/${vid}`).set({
+        label: `v${v}`,
+        note: v === d.versions ? "Latest version for review." : "Superseded.",
+        createdAt: days(-d.versions + v - 1),
+        mediaUrl: "",
+      });
+    }
+    // Add a feedback note on the latest version for deliverables with versions.
+    if (d.versions >= 1) {
+      const latest = `v${d.versions}`;
+      await db.doc(`deliverables/${d.id}/notes/n1`).set({
+        versionId: latest,
+        authorUid: d.orgId === "o_northlight" ? "u_north" : "u_pm",
+        body: "Looking good — tighten the intro and check color grade consistency.",
+        resolved: false,
+        createdAt: days(-1),
+      });
+    }
+  }
+
+  // Stage-tasks: one task per stage per deliverable (mirrors what the batch-
+  // create endpoint does). These populate the "Stage tasks" section and make
+  // stages clickable.
+  const stBatch = db.batch();
+  const stageStatuses = ["done", "done", "in_progress", "backlog", "backlog"];
+  const stageAssignees = ["u_editor", "u_editor", "u_editor2", "u_editor2", "u_editor"];
+  for (const d of DELIVERABLES) {
+    const stages = DEFAULT_STAGES;
+    for (let si = 0; si < stages.length; si++) {
+      const stage = stages[si];
+      // For delivered deliverables, all stages are done.
+      const status = d.status === "delivered" ? "done" : stageStatuses[si];
+      const assignee = d.orgId === "o_northlight" ? "u_editor" : stageAssignees[si];
+      const taskId = `${d.id}_${stage.id}`;
+      const done = status === "done" || status === "approved" || status === "delivered";
+      stBatch.set(db.doc(`tasks/${taskId}`), {
+        orgId: d.orgId,
+        title: `${stage.name}: ${d.name}`,
+        description: "",
+        subGroupId: d.subGroupId,
+        projectId: d.projectId,
+        clientId: d.clientId,
+        status,
+        assigneeUid: assignee,
+        clientVisible: false,
+        blockedReason: "",
+        blockedAt: null,
+        deliveryNote: "",
+        meta: [],
+        order: si,
+        dueAt: days(si * 2),
+        createdAt: days(-10),
+        completedAt: done ? days(-5 + si) : null,
+        deliverableId: d.id,
+        stageId: stage.id,
+      });
+    }
+  }
+  await stBatch.commit();
+
+  // Packages
+  const pkgBatch = db.batch();
+  for (const pkg of PACKAGES) {
+    pkgBatch.set(db.doc(`packages/${pkg.id}`), {
+      orgId: pkg.orgId,
+      clientId: pkg.clientId,
+      projectId: pkg.projectId,
+      name: pkg.name,
+      lines: pkg.lines,
+      startsOn: pkg.startsOn,
+      active: pkg.active,
+    });
+  }
+  await pkgBatch.commit();
+
+  // Recording sessions
+  const sesBatch = db.batch();
+  for (const ses of SESSIONS) {
+    sesBatch.set(db.doc(`sessions/${ses.id}`), {
+      orgId: ses.orgId,
+      clientId: ses.clientId,
+      projectId: ses.projectId,
+      name: ses.name,
+      location: ses.location,
+      date: ses.date,
+      startsAt: ses.startsAt,
+      endsAt: ses.endsAt,
+      taskIds: ses.taskIds,
+      notes: ses.notes,
+      createdAt: days(-5),
+    });
+  }
+  await sesBatch.commit();
+
+  // Versions + threaded notes on TASKS (separate writes; small volume).
   for (const t of TASKS) {
     for (let v = 1; v <= t.versions; v++) {
       const vid = `v${v}`;

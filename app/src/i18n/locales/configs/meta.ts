@@ -14,6 +14,8 @@ const en = {
   format: 'Format',
   duration: 'Duration',
   aspectRatio: 'Aspect ratio',
+  reference: 'Reference',
+  runtime: 'Runtime',
 }
 
 // Typed against en: a missing or extra key here is a compile error.
@@ -31,6 +33,8 @@ const es: typeof en = {
   format: 'Formato',
   duration: 'Duración',
   aspectRatio: 'Relación de aspecto',
+  reference: 'Referencia',
+  runtime: 'Duración máx.',
 }
 
 export default { en, es }

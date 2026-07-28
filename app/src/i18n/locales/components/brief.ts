@@ -8,6 +8,7 @@ const en = {
   linksHint: 'Links (one per line)',
   empty: 'No brief info yet. Click Edit to add some.',
   info: 'Immutable references for this project — brand guidelines, SOPs, links, and any custom fields. Managers can edit it here.',
+  deliverableSection: 'Deliverable',
 }
 
 const es: typeof en = {
@@ -20,6 +21,7 @@ const es: typeof en = {
   linksHint: 'Enlaces (uno por línea)',
   empty: 'Aún no hay información. Pulsa Editar para añadir.',
   info: 'Referencias fijas del proyecto: guía de marca, procedimientos, enlaces y campos personalizados. Los gestores pueden editarlo aquí.',
+  deliverableSection: 'Entregable',
 }
 
 export default { en, es }

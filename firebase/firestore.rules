@@ -164,7 +164,7 @@ service cloud.firestore {
         allow read: if isMemberOf(orgId);
         allow update: if isManagerOf(orgId)
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['role', 'clientId', 'displayName', 'capacityPointsPerDay'])
+            .hasOnly(['role', 'clientId', 'displayName', 'capacityPointsPerDay', 'title'])
           && validRole(request.resource.data.role)
           && resource.data.uid != orgData(orgId).ownerUid
           && !(memberId == request.auth.uid

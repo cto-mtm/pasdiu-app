@@ -399,7 +399,13 @@ onMounted(load)
       </div>
     </div>
 
-    <BriefDrawer :open="briefOpen" :project-id="project?.id ?? null" :brief="project?.brief ?? null" @close="briefOpen = false" />
+    <BriefDrawer
+      :open="briefOpen"
+      :project-id="project?.id ?? null"
+      :brief="project?.brief ?? null"
+      :deliverable-meta="parentDeliverable ? { name: parentDeliverable.name, meta: parentDeliverable.meta } : null"
+      @close="briefOpen = false"
+    />
 
     <!-- Edit task -->
     <Modal :open="showEditTask" :title="t('iteration.editTask')" @close="showEditTask = false">

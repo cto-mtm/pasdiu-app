@@ -37,7 +37,7 @@ const { canCreateTask } = useEntitlements()
 
 const projectId = computed(() => String(route.params.projectId))
 const project = ref<Project | undefined>()
-const view = ref<'kanban' | 'list'>('kanban')
+const view = ref<'kanban' | 'list' | 'deliverables'>('kanban')
 const briefOpen = ref(false)
 
 const { busy, run } = useBusy()
@@ -45,7 +45,7 @@ const { busy, run } = useBusy()
 // Edit project (name + default view)
 const showEditProject = ref(false)
 const epName = ref('')
-const epView = ref<'kanban' | 'list'>('kanban')
+const epView = ref<'kanban' | 'list' | 'deliverables'>('kanban')
 const epMeta = ref<MetaField[]>([])
 
 function openEditProject() {
@@ -164,6 +164,16 @@ async function createTask() {
   })
 }
 
+async function onBatchCreated() {
+  showBatchWizard.value = false
+  // The batch endpoint created deliverables + stage-tasks server-side.
+  // Reload the board so the new sub-groups, tasks, and deliverables appear.
+  await Promise.all([
+    data.loadProjectBoard(projectId.value),
+    data.loadProjectDeliverables(projectId.value),
+  ])
+}
+
 const client = computed(() => (project.value ? data.getClient(project.value.clientId) : undefined))
 const subGroups = computed(() => data.subGroupsForProject(projectId.value))
 const tasks = computed(() => data.tasksForProject(projectId.value))
@@ -245,66 +255,77 @@ onMounted(load)
         </div>
       </dl>
       <div class="flex flex-wrap items-center gap-2">
-        <!-- Fluid Kanban ↔ List toggle -->
+        <!-- Fluid Kanban ↔ List ↔ Deliverables toggle -->
         <SegmentedControl
           v-model="view"
           :options="[
             { value: 'kanban', label: t('board.viewKanban'), icon: 'kanban' },
             { value: 'list', label: t('board.viewList'), icon: 'list' },
+            { value: 'deliverables', label: t('board.viewDeliverables'), icon: 'grid' },
           ]"
         />
-        <button
-          class="shrink-0 whitespace-nowrap rounded-lg border px-3 py-1.5 text-sm"
-          style="background: var(--surface-2); color: var(--text); border-color: var(--border);"
-          @click="briefOpen = true"
-        >
-          {{ t('brief.open') }}
-        </button>
-        <button
-          v-if="auth.isManager"
-          class="shrink-0 whitespace-nowrap rounded-lg border px-3 py-1.5 text-sm"
-          style="background: var(--surface-2); color: var(--text); border-color: var(--border);"
-          @click="openEditProject"
-        >
-          {{ t('actions.editProject') }}
-        </button>
-        <!-- Secondary/bulk actions live behind the ⋯ menu to keep the toolbar lean. -->
-        <OverflowMenu v-if="auth.isManager">
+
+        <!-- Primary action: new task (always visible) -->
+        <BaseButton v-if="auth.isManager" class="ml-auto whitespace-nowrap" :disabled="!subGroups.length" @click="openTaskModal">
+          + {{ t('actions.newTask') }}
+        </BaseButton>
+
+        <!-- All other actions live in the ⋯ overflow menu -->
+        <OverflowMenu>
           <button
             role="menuitem"
-            class="block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-2)] disabled:opacity-50"
+            class="block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-2)]"
             style="color: var(--text);"
-            :disabled="!tasks.length || busy"
-            @click="bulkAction = 'share'"
+            @click="briefOpen = true"
           >
-            {{ t('board.shareAll') }}
+            {{ t('brief.open') }}
           </button>
-          <button
-            role="menuitem"
-            class="block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-2)] disabled:opacity-50"
-            style="color: var(--text);"
-            :disabled="!tasks.length || busy"
-            @click="bulkAction = 'hide'"
-          >
-            {{ t('board.hideAll') }}
-          </button>
+          <template v-if="auth.isManager">
+            <button
+              role="menuitem"
+              class="block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-2)]"
+              style="color: var(--text);"
+              @click="openEditProject"
+            >
+              {{ t('actions.editProject') }}
+            </button>
+            <button
+              role="menuitem"
+              class="block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-2)]"
+              style="color: var(--text);"
+              @click="showSub = true"
+            >
+              + {{ t('actions.newSubGroup') }}
+            </button>
+            <button
+              role="menuitem"
+              class="block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-2)]"
+              style="color: var(--text);"
+              @click="showBatchWizard = true"
+            >
+              + {{ t('batchCreate.title') }}
+            </button>
+            <hr style="border-color: var(--border);" />
+            <button
+              role="menuitem"
+              class="block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-2)] disabled:opacity-50"
+              style="color: var(--text);"
+              :disabled="!tasks.length || busy"
+              @click="bulkAction = 'share'"
+            >
+              {{ t('board.shareAll') }}
+            </button>
+            <button
+              role="menuitem"
+              class="block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-2)] disabled:opacity-50"
+              style="color: var(--text);"
+              :disabled="!tasks.length || busy"
+              @click="bulkAction = 'hide'"
+            >
+              {{ t('board.hideAll') }}
+            </button>
+          </template>
         </OverflowMenu>
-        <!-- Push create actions to the right on wide screens, wrap under on narrow. -->
-        <div v-if="auth.isManager" class="flex flex-wrap items-center gap-2 sm:ml-auto">
-          <button
-            class="shrink-0 whitespace-nowrap rounded-lg border px-3 py-1.5 text-sm"
-            style="background: var(--surface-2); color: var(--text); border-color: var(--border);"
-            @click="showSub = true"
-          >
-            + {{ t('actions.newSubGroup') }}
-          </button>
-          <BaseButton class="shrink-0 whitespace-nowrap" @click="showBatchWizard = true">
-            + {{ t('batchCreate.title') }}
-          </BaseButton>
-          <BaseButton class="shrink-0 whitespace-nowrap" :disabled="!subGroups.length" @click="openTaskModal">
-            + {{ t('actions.newTask') }}
-          </BaseButton>
-        </div>
       </div>
     </div>
 
@@ -323,7 +344,7 @@ onMounted(load)
     </div>
 
     <!-- LIST: grouped by sub-group, sequential -->
-    <div v-else class="mt-6 space-y-6">
+    <div v-else-if="view === 'list'" class="mt-6 space-y-6">
       <div v-for="sg in subGroups" :key="sg.id">
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div class="flex items-center gap-2">
@@ -358,19 +379,33 @@ onMounted(load)
           </div>
         </dl>
 
-        <!-- Deliverable rows (read from stageSummary — zero task reads) -->
-        <div v-if="data.deliverablesForSubGroup(sg.id).length" class="space-y-2 mb-3">
+        <!-- All tasks in this sub-group -->
+        <TransitionGroup name="list" tag="div" class="space-y-2">
+          <TaskCard v-for="tk in tasksBySubGroup(sg.id)" :key="tk.id" :task="tk" />
+        </TransitionGroup>
+      </div>
+    </div>
+
+    <!-- DELIVERABLES: grouped by sub-group -->
+    <div v-else class="mt-6 space-y-6">
+      <div v-for="sg in subGroups" :key="sg.id">
+        <div class="mb-2 flex items-center gap-2">
+          <h2 class="text-sm font-semibold uppercase tracking-wide" style="color: var(--text-muted);">{{ sg.name }}</h2>
+          <span class="text-xs" style="color: var(--text-muted);">{{ data.deliverablesForSubGroup(sg.id).length }}</span>
+        </div>
+        <div v-if="data.deliverablesForSubGroup(sg.id).length" class="space-y-2">
           <RouterLink
             v-for="del in data.deliverablesForSubGroup(sg.id)"
             :key="del.id"
             :to="{ name: 'deliverable', params: { deliverableId: del.id } }"
             class="flex items-center justify-between rounded-xl border p-3 transition-transform hover:-translate-y-0.5"
             style="background: var(--surface); border-color: var(--border);"
-            :style="{ viewTransitionName: `deliverable-title-${del.id}` }"
           >
-            <div>
+            <div class="flex items-center gap-3">
               <span class="text-sm font-medium" style="color: var(--text);">{{ del.name }}</span>
-              <span class="ml-2 text-xs" style="color: var(--text-muted);">{{ del.status }}</span>
+              <span class="rounded px-1.5 py-0.5 text-xs" style="background: var(--surface-2); color: var(--text-muted);">
+                {{ del.status }}
+              </span>
             </div>
             <div class="flex items-center gap-1">
               <span
@@ -380,15 +415,13 @@ onMounted(load)
                 :title="`${ss.name}: ${ss.status}`"
                 :style="{ background: statusColor(ss.status) }"
               />
+              <span v-if="!del.stageSummary.length" class="text-xs" style="color: var(--text-muted);">—</span>
             </div>
           </RouterLink>
         </div>
-
-        <!-- Standalone tasks (not linked to a deliverable) -->
-        <TransitionGroup name="list" tag="div" class="space-y-2">
-          <TaskCard v-for="tk in tasksBySubGroup(sg.id).filter(t => !t.deliverableId)" :key="tk.id" :task="tk" />
-        </TransitionGroup>
+        <p v-else class="text-sm" style="color: var(--text-muted);">{{ t('board.noDeliverables') }}</p>
       </div>
+      <p v-if="!subGroups.length" class="text-sm" style="color: var(--text-muted);">{{ t('board.noDeliverables') }}</p>
     </div>
 
     <BriefDrawer :open="briefOpen" :project-id="project.id" :brief="project.brief" @close="briefOpen = false" />
@@ -408,6 +441,7 @@ onMounted(load)
           <BaseSelect v-model="epView">
             <option value="kanban">{{ t('board.viewKanban') }}</option>
             <option value="list">{{ t('board.viewList') }}</option>
+            <option value="deliverables">{{ t('board.viewDeliverables') }}</option>
           </BaseSelect>
         </label>
         <div>
@@ -551,7 +585,7 @@ onMounted(load)
       :open="showBatchWizard"
       :project-id="projectId"
       @close="showBatchWizard = false"
-      @created="showBatchWizard = false"
+      @created="onBatchCreated"
     />
   </section>
 

@@ -37,6 +37,7 @@ const showInvite = ref(false)
 const showSeatUpsell = ref(false)
 const inviteEmail = ref('')
 const inviteRole = ref<Role>('contractor')
+const inviteTitle = ref('')
 const inviteClientId = ref('')
 const clientError = ref(false)
 const { busy, run } = useBusy()
@@ -50,6 +51,7 @@ function openInvite() {
   }
   inviteEmail.value = ''
   inviteRole.value = 'contractor'
+  inviteTitle.value = ''
   inviteClientId.value = ''
   clientError.value = false
   showInvite.value = true
@@ -65,6 +67,7 @@ async function saveInvite() {
       email,
       role: inviteRole.value,
       ...(inviteRole.value === 'client' ? { clientId: inviteClientId.value } : {}),
+      ...(inviteTitle.value.trim() ? { title: inviteTitle.value.trim() } : {}),
     })
     // Viral-loop signal (BUSINESS_MODEL §7.7) — role only, never the email.
     track('invite_created', { role: inviteRole.value })
@@ -160,7 +163,9 @@ onMounted(load)
           </div>
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-medium" style="color: var(--text);">{{ m.displayName }}</p>
-            <p class="truncate text-xs" style="color: var(--text-muted);">{{ t('roles.' + m.role) }}</p>
+            <p class="truncate text-xs" style="color: var(--text-muted);">
+              {{ t('roles.' + m.role) }}<template v-if="m.title"> · {{ m.title }}</template>
+            </p>
           </div>
           <div class="text-right">
             <p class="text-lg font-semibold" style="color: var(--text);">{{ m.active }}</p>
@@ -239,6 +244,10 @@ onMounted(load)
           <BaseSelect v-model="inviteRole">
             <option v-for="r in ROLES" :key="r" :value="r">{{ t('roles.' + r) }}</option>
           </BaseSelect>
+        </label>
+        <label v-if="inviteRole !== 'client'" class="block">
+          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('team.titleLabel') }}</span>
+          <BaseInput v-model="inviteTitle" :placeholder="t('team.titlePlaceholder')" />
         </label>
         <label v-if="inviteRole === 'client'" class="block">
           <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('team.clientLabel') }}</span>

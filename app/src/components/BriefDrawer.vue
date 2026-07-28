@@ -9,7 +9,7 @@ import MetaEditor from './MetaEditor.vue'
 import InfoTip from './InfoTip.vue'
 import BaseInput from './BaseInput.vue'
 
-const props = defineProps<{ open: boolean; projectId: string | null; brief: ProjectBrief | null }>()
+const props = defineProps<{ open: boolean; projectId: string | null; brief: ProjectBrief | null; deliverableMeta?: { name: string; meta: MetaField[] } | null }>()
 const emit = defineEmits<{ close: [] }>()
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -110,11 +110,22 @@ async function save() {
               </dl>
             </div>
             <p
-              v-if="!brief.brandGuidelinesUrl && !brief.sopUrl && !brief.links.length && !brief.fields.length"
+              v-if="!brief.brandGuidelinesUrl && !brief.sopUrl && !brief.links.length && !brief.fields.length && !deliverableMeta?.meta?.length"
               style="color: var(--text-muted);"
             >
               {{ t('brief.empty') }}
             </p>
+
+            <!-- Deliverable metadata (when task belongs to a deliverable) -->
+            <div v-if="deliverableMeta?.meta?.length" class="border-t pt-4" style="border-color: var(--border);">
+              <p class="text-xs uppercase tracking-wide" style="color: var(--accent-cyan);">{{ t('brief.deliverableSection') }} — {{ deliverableMeta.name }}</p>
+              <dl class="mt-2 space-y-1">
+                <div v-for="(f, i) in deliverableMeta.meta" :key="i" class="flex justify-between gap-3">
+                  <dt style="color: var(--text-muted);">{{ f.label }}</dt>
+                  <dd class="text-right" style="color: var(--text);">{{ f.value }}</dd>
+                </div>
+              </dl>
+            </div>
           </div>
         </template>
 

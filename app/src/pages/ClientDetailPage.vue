@@ -31,7 +31,7 @@ const { busy, run } = useBusy()
 // Create project
 const showNew = ref(false)
 const name = ref('')
-const view = ref<'kanban' | 'list'>('kanban')
+const view = ref<'kanban' | 'list' | 'deliverables'>('kanban')
 
 async function create() {
   if (!name.value.trim()) return

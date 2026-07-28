@@ -18,9 +18,27 @@ export const onInviteCreated = onDocumentCreated(
     region: "us-east5",
   },
   async (event) => {
-    if (!event.data) return;
+    if (!event.data) {
+      logger.warn("onInviteCreated fired with no event data");
+      return;
+    }
     const { orgId, inviteId } = event.params;
-    const queued = await sendInviteEmailFor(getFirestore(), orgId, inviteId, event.data.data());
-    if (queued) logger.info("invite email queued", { orgId, inviteId });
+    const data = event.data.data();
+    logger.info("onInviteCreated triggered", {
+      orgId,
+      inviteId,
+      email: typeof data.email === "string" ? data.email : "<missing>",
+      status: data.status,
+    });
+    try {
+      const queued = await sendInviteEmailFor(getFirestore(), orgId, inviteId, data);
+      if (queued) {
+        logger.info("invite email queued", { orgId, inviteId });
+      } else {
+        logger.warn("invite email was NOT queued (sendInviteEmailFor returned false)", { orgId, inviteId });
+      }
+    } catch (err) {
+      logger.error("invite email failed with exception", { orgId, inviteId, error: String(err) });
+    }
   }
 );
