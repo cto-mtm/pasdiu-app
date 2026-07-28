@@ -177,8 +177,6 @@ async function onBatchCreated() {
 const client = computed(() => (project.value ? data.getClient(project.value.clientId) : undefined))
 const subGroups = computed(() => data.subGroupsForProject(projectId.value))
 const tasks = computed(() => data.tasksForProject(projectId.value))
-// Standalone tasks (no deliverable) for the legacy board views.
-const standaloneTasks = computed(() => tasks.value.filter((t) => !t.deliverableId))
 
 // Bulk client visibility (managers): share or hide the whole project's tasks
 // at once — the friendly path now that new tasks default to hidden.

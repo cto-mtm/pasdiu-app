@@ -155,7 +155,7 @@ async function submit() {
     )
 
     if (!result.ok) {
-      toast.error(t(result.error.key, result.error.params))
+      toast.error(t(result.error.key, result.error.params ?? {}))
       return
     }
 
@@ -201,7 +201,7 @@ watch(() => props.open, (open) => {
       <div v-if="step === 1" class="space-y-3">
         <label class="block">
           <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('batchCreate.countLabel') }}</span>
-          <BaseInput v-model.number="count" type="number" min="1" max="200" />
+          <input v-model.number="count" type="number" min="1" max="200" class="w-full rounded-lg border px-3 py-2 text-sm outline-none" style="background: var(--surface-2); color: var(--text); border-color: var(--border);" />
         </label>
         <label class="block">
           <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('batchCreate.namePatternLabel') }}</span>

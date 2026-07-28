@@ -493,6 +493,7 @@ export const useDataStore = defineStore('data', () => {
       clientId: input.clientId, status: input.status, assigneeUid: input.assigneeUid,
       clientVisible: input.clientVisible, blockedReason: '', blockedAt: null, deliveryNote: '', meta,
       order, dueAt: input.dueAt, createdAt: new Date(), completedAt: null,
+      deliverableId: '', stageId: '',
     }
     upsert(tasks.value, t)
     return t

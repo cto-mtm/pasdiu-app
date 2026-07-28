@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { collection, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { useDataStore } from '../stores/data'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 import { useBusy } from '../composables/useBusy'
@@ -15,7 +14,6 @@ import Modal from '../components/Modal.vue'
 import ModalFooter from '../components/ModalFooter.vue'
 
 const { t } = useI18n()
-const data = useDataStore()
 const auth = useAuthStore()
 const toast = useToastStore()
 const { busy, run } = useBusy()
@@ -55,7 +53,7 @@ async function submitRequestChanges() {
       method: 'POST',
       body: JSON.stringify({ note: changesNote.value.trim() }),
     })
-    if (!res.ok) { toast.error(t(res.error.key, res.error.params)); return }
+    if (!res.ok) { toast.error(t(res.error.key, res.error.params ?? {})); return }
     toast.success(t('portal.changesRequested'))
     // Reload to reflect status change.
     await load()
@@ -69,7 +67,7 @@ async function approve(delId: string) {
     const res = await apiFetch(`/orgs/${orgId}/deliverables/${delId}/approve`, {
       method: 'POST',
     })
-    if (!res.ok) { toast.error(t(res.error.key, res.error.params)); return }
+    if (!res.ok) { toast.error(t(res.error.key, res.error.params ?? {})); return }
     toast.success(t('portal.approved'))
     await load()
   })
@@ -84,7 +82,7 @@ async function bulkApprove(batch: Deliverable[]) {
       method: 'POST',
       body: JSON.stringify({ deliverableIds: activeIds }),
     })
-    if (!res.ok) { toast.error(t(res.error.key, res.error.params)); return }
+    if (!res.ok) { toast.error(t(res.error.key, res.error.params ?? {})); return }
     toast.success(t('portal.bulkApproved', { count: activeIds.length }))
     await load()
   })

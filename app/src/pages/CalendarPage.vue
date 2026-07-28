@@ -5,7 +5,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { addDoc, collection, getDocs, query, where, Timestamp } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { useDataStore } from '../stores/data'
 import { useAuthStore } from '../stores/auth'
 import { mapRecordingSession, mapTask } from '../lib/mappers'
 import type { RecordingSession, Task } from '../lib/types'
@@ -15,7 +14,6 @@ import Modal from '../components/Modal.vue'
 import ModalFooter from '../components/ModalFooter.vue'
 
 const { t } = useI18n()
-const data = useDataStore()
 const auth = useAuthStore()
 
 const currentMonth = ref(new Date())

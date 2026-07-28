@@ -176,7 +176,7 @@ async function load() {
       if (tk.deliverableId) {
         const { getDoc, doc: docRef } = await import('firebase/firestore')
         const { db: fireDb } = await import('../lib/firebase')
-        const { mapDeliverable, mapTask: mapT } = await import('../lib/mappers')
+        const { mapDeliverable } = await import('../lib/mappers')
         const delSnap = await getDoc(docRef(fireDb, 'deliverables', tk.deliverableId))
         if (delSnap.exists()) {
           parentDeliverable.value = mapDeliverable(delSnap.id, delSnap.data())

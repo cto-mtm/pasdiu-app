@@ -37,6 +37,7 @@ export type AnalyticsEvent =
   | 'checkout_completed'
   // Retention signals
   | 'workspace_left'
+  | 'invite_auto_accepted'
 
 const KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined
 
