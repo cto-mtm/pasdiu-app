@@ -6,6 +6,7 @@ import { useDataStore } from '../stores/data'
 import { useAuthStore } from '../stores/auth'
 import { useBusy } from '../composables/useBusy'
 import { sanitizeExternalUrl } from '../lib/url'
+import { fromDateInputValue, toDateInputValue } from '../lib/dates'
 import type { Deliverable, Version, Note, MetaField } from '../lib/types'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -92,6 +93,7 @@ const etAssignee = ref('')
 const etClientVisible = ref(false)
 const etBlockedReason = ref('')
 const etDeliveryNote = ref('')
+const etDueAt = ref('')
 const etMeta = ref<MetaField[]>([])
 
 function openEditTask() {
@@ -100,6 +102,7 @@ function openEditTask() {
   etDesc.value = task.value.description
   etAssignee.value = task.value.assigneeUid
   etClientVisible.value = task.value.clientVisible
+  etDueAt.value = toDateInputValue(task.value.dueAt)
   etBlockedReason.value = task.value.blockedReason
   etDeliveryNote.value = task.value.deliveryNote
   etMeta.value = task.value.meta.map((f) => ({ ...f }))
@@ -113,6 +116,8 @@ async function saveTask() {
       description: etDesc.value.trim(),
       assigneeUid: etAssignee.value,
       clientVisible: etClientVisible.value,
+      // Overrides whatever the workflow's stage durations derived.
+      dueAt: fromDateInputValue(etDueAt.value),
       // Reason/note are only editable (and only meaningful) in their status.
       ...(task.value!.status === 'blocked' ? { blockedReason: etBlockedReason.value.trim() } : {}),
       ...(task.value!.status === 'delivered' ? { deliveryNote: etDeliveryNote.value.trim() } : {}),
@@ -428,6 +433,11 @@ onMounted(load)
           <BaseSelect v-model="etAssignee">
             <option v-for="u in data.teamMembers" :key="u.uid" :value="u.uid">{{ u.displayName }}</option>
           </BaseSelect>
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('actions.dueLabel') }}</span>
+          <BaseInput v-model="etDueAt" type="date" />
+          <span class="mt-1 block text-xs" style="color: var(--text-muted);">{{ t('actions.dueHint') }}</span>
         </label>
         <label class="flex items-start gap-2">
           <input v-model="etClientVisible" type="checkbox" class="mt-0.5" />

@@ -108,7 +108,14 @@ export function mapOrg(id: string, d: Record<string, unknown>): Org {
     deliverableLimit: (d.deliverableLimit as number) ?? FREE_LIMITS.deliverableLimit,
     subscriptionStatus: (d.subscriptionStatus as SubscriptionStatus) ?? 'none',
     currentPeriodEnd: toDate(d.currentPeriodEnd),
-    pipeline: (d.pipeline as WorkflowPipeline) ?? { stages: [] },
+    // Stages are normalized rather than blind-cast: durationHours postdates
+    // the first pipelines, so docs written before it lack the field entirely
+    // and 0 (this stage consumes no schedule time) is the right stand-in.
+    pipeline: {
+      stages: ((d.pipeline as Partial<WorkflowPipeline> | undefined)?.stages ?? []).map(
+        (s): WorkflowStage => ({ ...s, durationHours: s.durationHours ?? 0 }),
+      ),
+    },
   }
 }
 

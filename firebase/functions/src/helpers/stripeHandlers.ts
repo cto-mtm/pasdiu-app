@@ -3,7 +3,6 @@ import type { DocumentReference, Firestore } from "firebase-admin/firestore";
 import { logger } from "firebase-functions/v2";
 import type Stripe from "stripe";
 import {
-  billingEnabled,
   getStripe,
   planForPriceId,
 } from "./stripe.js";
@@ -164,32 +163,8 @@ export async function handleStripeEvent(event: Stripe.Event): Promise<void> {
   }
 }
 
-/**
- * Best-effort Stripe seat sync — quantity = current seat count. Called after
- * the seats transaction commits (invite accept, member removal). Never throws:
- * a Stripe hiccup must not fail the membership change.
- */
-export async function syncSeatQuantity(db: Firestore, orgId: string): Promise<void> {
-  try {
-    if (!billingEnabled()) return;
-    const [orgSnap, usageSnap] = await Promise.all([
-      db.doc(`orgs/${orgId}`).get(),
-      db.doc(`orgs/${orgId}/usage/current`).get(),
-    ]);
-    const subscriptionId = orgSnap.get("stripeSubscriptionId");
-    const seats = usageSnap.get("seats");
-    if (typeof subscriptionId !== "string" || !subscriptionId) return;
-    if (typeof seats !== "number" || seats < 1) return;
-    const stripe = getStripe();
-    const sub = await stripe.subscriptions.retrieve(subscriptionId);
-    const item = sub.items?.data?.[0];
-    if (!item || item.quantity === seats) return;
-    await stripe.subscriptions.update(subscriptionId, {
-      items: [{ id: item.id, quantity: seats }],
-      proration_behavior: "create_prorations",
-    });
-    logger.info("stripe seat sync", { orgId, seats });
-  } catch (err) {
-    logger.warn("stripe seat sync failed (ignored)", { orgId, err });
-  }
-}
+// NOTE: `syncSeatQuantity` was removed in the 2026-07-29 flat-rate revision
+// (BUSINESS_MODEL §2). Plans are billed as one flat unit per workspace, so a
+// subscription's quantity is always 1 and there is nothing to keep in sync.
+// Pushing the seat count here would multiply the flat price by the team size.
+// Seats are still counted on usage/current, but purely as a plan cap.

@@ -84,6 +84,6 @@ describe("POST /orgs", () => {
 
     // Usage counters: the owner's seat, nothing else.
     const usage = await db.doc(`orgs/${orgId}/usage/current`).get();
-    expect(usage.data()).toEqual({ seats: 1, activeClients: 0, activeTasks: 0 });
+    expect(usage.data()).toEqual({ seats: 1, activeClients: 0, activeTasks: 0, activeDeliverables: 0 });
   });
 });

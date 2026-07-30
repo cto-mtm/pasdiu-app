@@ -31,6 +31,7 @@ const en = {
   subGroupLabel: 'Sub-group',
   assigneeLabel: 'Assignee',
   dueLabel: 'Due date',
+  dueHint: 'Set from your workflow when the deliverable was created. Change it here to override.',
   clientVisibleLabel: 'Visible to client',
   clientVisibleHint: 'Clients only see tasks you share with them.',
 }
@@ -68,6 +69,7 @@ const es: typeof en = {
   subGroupLabel: 'Subgrupo',
   assigneeLabel: 'Responsable',
   dueLabel: 'Fecha límite',
+  dueHint: 'Se calculó con tu flujo de trabajo al crear el entregable. Cámbiala aquí para ajustarla.',
   clientVisibleLabel: 'Visible para el cliente',
   clientVisibleHint: 'Los clientes solo ven las tareas que compartes con ellos.',
 }

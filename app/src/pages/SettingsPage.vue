@@ -18,6 +18,7 @@ import BaseInput from '../components/BaseInput.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import SegmentedControl from '../components/SegmentedControl.vue'
 import ImportWizard from '../components/ImportWizard.vue'
+import WorkflowEditor from '../components/WorkflowEditor.vue'
 
 const { t, d } = useI18n()
 const route = useRoute()
@@ -109,12 +110,12 @@ const PLAN_KEYS = {
 } as const satisfies Record<Plan, string>
 const planLabel = computed(() => t(PLAN_KEYS[auth.org?.plan ?? 'free']))
 
-// Per-seat/month display price for the selected interval (annual = the
-// discounted per-month price, billed annually).
+// Flat per-workspace price for the selected interval. Annual is the whole-year
+// total (10 × monthly), not a per-month equivalent.
 function priceFor(plan: 'studio' | 'agency'): number {
   const p = billingConfig.value?.plans[plan]
   if (!p) return 0
-  return interval.value === 'year' ? p.priceAnnual : p.priceMonthly
+  return interval.value === 'year' ? p.priceAnnualTotal : p.priceMonthly
 }
 
 // Checkout/portal both end in a full-page redirect to a Stripe-hosted URL;
@@ -256,6 +257,13 @@ onMounted(() => {
             {{ renameBusy ? t('common.loading') : t('settings.renameCta') }}
           </BaseButton>
         </form>
+      </div>
+
+      <!-- Workflow (managers): the pipeline every new deliverable follows.
+           Needs the org doc loaded — the editor drafts from auth.org.pipeline. -->
+      <div v-if="auth.isManager && auth.org" class="rounded-xl border p-5" style="background: var(--surface); border-color: var(--border);">
+        <h2 class="text-sm font-semibold uppercase tracking-wide" style="color: var(--text-muted);">{{ t('workflow.title') }}</h2>
+        <WorkflowEditor />
       </div>
 
       <!-- Import (managers; paid plans only — the wizard stays unmountable on Free) -->

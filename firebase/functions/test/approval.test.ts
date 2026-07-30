@@ -9,7 +9,10 @@
 //   - 201 manager proxy approve (approvedVia = 'in_person')
 //   - 201 request-changes sets revisions + note
 //   - 201 bulk approve
-import { describe, it, beforeEach } from "node:test";
+// Runner note: these register with vitest (see package.json "test"). Importing
+// describe/it from node:test instead makes the whole file silently register
+// zero tests under `vitest run`.
+import { describe, it, beforeEach } from "vitest";
 import assert from "node:assert/strict";
 import { getFirestore } from "firebase-admin/firestore";
 import {

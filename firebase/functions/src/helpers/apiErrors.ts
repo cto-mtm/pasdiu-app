@@ -6,9 +6,21 @@ import type { AuthedRequest } from "./auth.js";
 
 export const MANAGER_ROLES = ["admin", "pm"];
 
-/** Error carrying an HTTP status — thrown inside handlers/transactions. */
+/**
+ * Roles that consume a seat. Client-role members are external reviewers — they
+ * are unlimited and free on every plan (BUSINESS_MODEL §3), so they must never
+ * count against `usage.seats` or the plan's seatLimit.
+ */
+export const TEAM_ROLES = ["admin", "pm", "contractor"];
+
+/**
+ * Error carrying an HTTP status — thrown inside handlers/transactions.
+ * `message` doubles as the machine-readable error code the app switches on;
+ * `details` is optional context (validation output, offending ids) echoed
+ * alongside it rather than being crammed into the code.
+ */
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public details?: unknown) {
     super(message);
   }
 }
@@ -18,7 +30,11 @@ export function asyncHandler(handler: (req: Request, res: Response) => Promise<v
   return (req: Request, res: Response): void => {
     handler(req, res).catch((err: unknown) => {
       if (err instanceof ApiError) {
-        res.status(err.status).json({ error: err.message });
+        res.status(err.status).json(
+          err.details === undefined
+            ? { error: err.message }
+            : { error: err.message, details: err.details }
+        );
         return;
       }
       logger.error("api error", err);

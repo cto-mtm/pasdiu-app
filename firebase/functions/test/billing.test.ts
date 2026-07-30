@@ -27,6 +27,10 @@ import {
   stripeSignature,
 } from "./helpers.js";
 import { PRICE_LOOKUP_KEYS, priceIdFor } from "../src/helpers/stripe.js";
+// Limits are asserted through PLAN_LIMITS, never as literals: the webhook
+// writes whatever the table says, so hardcoding the numbers here only creates
+// a second source of truth that goes stale the next time pricing changes.
+import { PLAN_LIMITS } from "../src/plans.js";
 
 const FAKE_ENV = {
   STRIPE_SECRET_KEY: "sk_test_offline_fake",
@@ -98,8 +102,8 @@ describe("billing disabled (no Stripe env)", () => {
     expect(res.body).toEqual({
       enabled: false,
       plans: {
-        studio: { seatLimit: 15, clientLimit: 25, taskLimit: 10000, priceMonthly: 12, priceAnnual: 10 },
-        agency: { seatLimit: 50, clientLimit: -1, taskLimit: -1, priceMonthly: 25, priceAnnual: 21 },
+        studio: { seatLimit: 20, clientLimit: -1, taskLimit: 10000, priceMonthly: 49, priceAnnualTotal: 490 },
+        agency: { seatLimit: -1, clientLimit: -1, taskLimit: -1, priceMonthly: 149, priceAnnualTotal: 1490 },
       },
     });
   });
@@ -269,9 +273,9 @@ describe("POST /billing/webhook (offline-signed events)", () => {
     const db = getFirestore();
     const org = await db.doc("orgs/org-wh1").get();
     expect(org.get("plan")).toBe("studio");
-    expect(org.get("seatLimit")).toBe(15);
-    expect(org.get("clientLimit")).toBe(25);
-    expect(org.get("taskLimit")).toBe(10000);
+    expect(org.get("seatLimit")).toBe(PLAN_LIMITS.studio.seatLimit);
+    expect(org.get("clientLimit")).toBe(PLAN_LIMITS.studio.clientLimit);
+    expect(org.get("taskLimit")).toBe(PLAN_LIMITS.studio.taskLimit);
     expect(org.get("subscriptionStatus")).toBe("active");
     expect(org.get("stripeSubscriptionId")).toBe("sub_wh1");
     const end = org.get("currentPeriodEnd") as Timestamp;
@@ -300,9 +304,9 @@ describe("POST /billing/webhook (offline-signed events)", () => {
 
     const org = await getFirestore().doc("orgs/org-wh2").get();
     expect(org.get("plan")).toBe("agency");
-    expect(org.get("seatLimit")).toBe(50);
-    expect(org.get("clientLimit")).toBe(-1);
-    expect(org.get("taskLimit")).toBe(-1);
+    expect(org.get("seatLimit")).toBe(PLAN_LIMITS.agency.seatLimit);
+    expect(org.get("clientLimit")).toBe(PLAN_LIMITS.agency.clientLimit);
+    expect(org.get("taskLimit")).toBe(PLAN_LIMITS.agency.taskLimit);
     expect(org.get("subscriptionStatus")).toBe("active");
   });
 
@@ -323,7 +327,7 @@ describe("POST /billing/webhook (offline-signed events)", () => {
 
     const org = await getFirestore().doc("orgs/org-wh3").get();
     expect(org.get("plan")).toBe("free"); // untouched
-    expect(org.get("seatLimit")).toBe(2); // free limits untouched
+    expect(org.get("seatLimit")).toBe(PLAN_LIMITS.free.seatLimit); // free limits untouched
     expect(org.get("subscriptionStatus")).toBe("active"); // status still tracked
   });
 
@@ -356,9 +360,9 @@ describe("POST /billing/webhook (offline-signed events)", () => {
   it("customer.subscription.deleted downgrades to free, cancels, and removes the subscription id", async () => {
     await seedOrg("org-wh5", {
       plan: "studio",
-      seatLimit: 15,
-      clientLimit: 25,
-      taskLimit: 10000,
+      seatLimit: PLAN_LIMITS.studio.seatLimit,
+      clientLimit: PLAN_LIMITS.studio.clientLimit,
+      taskLimit: PLAN_LIMITS.studio.taskLimit,
       subscriptionStatus: "active",
       stripeSubscriptionId: "sub_wh5",
     });
@@ -376,9 +380,9 @@ describe("POST /billing/webhook (offline-signed events)", () => {
 
     const org = await getFirestore().doc("orgs/org-wh5").get();
     expect(org.get("plan")).toBe("free");
-    expect(org.get("seatLimit")).toBe(2);
-    expect(org.get("clientLimit")).toBe(3);
-    expect(org.get("taskLimit")).toBe(500);
+    expect(org.get("seatLimit")).toBe(PLAN_LIMITS.free.seatLimit);
+    expect(org.get("clientLimit")).toBe(PLAN_LIMITS.free.clientLimit);
+    expect(org.get("taskLimit")).toBe(PLAN_LIMITS.free.taskLimit);
     expect(org.get("subscriptionStatus")).toBe("canceled");
     expect(org.get("stripeSubscriptionId")).toBeUndefined(); // FieldValue.delete()
   });

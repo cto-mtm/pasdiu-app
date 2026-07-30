@@ -24,6 +24,7 @@
 //   GOOGLE_APPLICATION_CREDENTIALS=path/to/key.json node migrate-versions.mjs
 
 import admin from "firebase-admin";
+import { DEFAULT_PIPELINE_STAGES } from "@pasdiu/shared";
 
 process.env.FIRESTORE_EMULATOR_HOST ||= "127.0.0.1:8080";
 
@@ -34,14 +35,10 @@ const db = admin.firestore();
 // tasks in the beta since the pipeline didn't exist before).
 const DEFAULT_STAGE_ID = "s_edit";
 
-// Default stage snapshot for migrated deliverables.
-const DEFAULT_STAGES = [
-  { id: "s_discovery", name: "Discovery", optional: true, clientFacing: false },
-  { id: "s_capture", name: "Capture", optional: false, clientFacing: false },
-  { id: "s_edit", name: "Edit", optional: false, clientFacing: false },
-  { id: "s_review", name: "Review", optional: false, clientFacing: true },
-  { id: "s_approval", name: "Approval", optional: false, clientFacing: true },
-];
+// Default stage snapshot for migrated deliverables — the same constant org
+// creation seeds, so a migrated deliverable carries the same stage shape (and
+// the same durationHours) as one created today.
+const DEFAULT_STAGES = DEFAULT_PIPELINE_STAGES;
 
 async function migrate() {
   const tasksSnap = await db.collection("tasks").get();

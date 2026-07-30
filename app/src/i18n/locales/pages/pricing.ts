@@ -2,8 +2,8 @@
 // numbers (seats/clients/tasks/prices) are interpolated from lib/plans.ts —
 // never hardcoded here — so the two can't drift independently of that module.
 const en = {
-  title: 'Simple per-seat pricing',
-  subtitle: 'Start free, upgrade when your team or client list grows. Cancel anytime.',
+  title: 'One flat price per workspace',
+  subtitle: 'No per-seat billing. Pick a plan, invite your whole crew, and pay the same. Cancel anytime.',
   // The headline differentiator: reviewers never cost anything, on any tier.
   clientUsersBanner: 'Client reviewers are always free — unlimited, on every plan.',
   backToApp: 'Back to app',
@@ -14,7 +14,8 @@ const en = {
   priceFree: '$0',
   priceCustom: 'Custom',
   priceAmount: '${price}',
-  perSeatMo: 'per seat / month',
+  perMo: 'per month, all seats included',
+  perYr: 'per year, all seats included',
   qualFree: 'free forever',
   qualEnterprise: 'custom, annual billing',
   // Tier names.
@@ -52,14 +53,16 @@ const en = {
   faqActiveA: 'An active client is any client in your workspace; an active task is any task that exists on a board. Limits count what is currently in the workspace — nothing is ever deleted for you.',
   faqCancelQ: 'Can I cancel anytime?',
   faqCancelA: 'Yes, from the billing portal. Your workspace drops to the Free limits at the end of the billing period, and your data is never deleted.',
-  faqSeatsQ: 'Do contractors in multiple workspaces pay twice?',
-  faqSeatsA: 'Each workspace pays for its own seats. A contractor who works in two workspaces is one seat in each — the same account, billed by each workspace that invites them.',
+  faqSeatsQ: 'Does adding a crew member cost extra?',
+  faqSeatsA: 'No. Every plan includes a seat allowance, and inviting people costs nothing until you reach it — a 4-person studio and a 19-person studio both pay the Studio price. A contractor who works in two workspaces takes a seat in each, but neither workspace pays more for them.',
+  faqCapQ: 'What happens when I hit my seat limit?',
+  faqCapA: 'New invites stop being accepted until you upgrade or free up a seat. Nothing breaks and nobody is removed — Studio covers up to 20 people, and Agency has no seat limit at all.',
 }
 
 // Typed against en: a missing or extra key here is a compile error.
 const es: typeof en = {
-  title: 'Precios simples por puesto',
-  subtitle: 'Empieza gratis y mejora tu plan cuando crezca tu equipo o tu lista de clientes. Cancela cuando quieras.',
+  title: 'Un precio fijo por espacio de trabajo',
+  subtitle: 'Sin facturación por puesto. Elige un plan, invita a todo tu equipo y paga lo mismo. Cancela cuando quieras.',
   clientUsersBanner: 'Los revisores de cliente son siempre gratis: ilimitados, en todos los planes.',
   backToApp: 'Volver a la app',
   mostPopular: 'Más popular',
@@ -68,7 +71,8 @@ const es: typeof en = {
   priceFree: '0 US$',
   priceCustom: 'A medida',
   priceAmount: '{price} US$',
-  perSeatMo: 'por puesto / mes',
+  perMo: 'al mes, con todos los puestos incluidos',
+  perYr: 'al año, con todos los puestos incluidos',
   qualFree: 'gratis para siempre',
   qualEnterprise: 'a medida, facturación anual',
   tierFree: 'Gratis',
@@ -102,8 +106,10 @@ const es: typeof en = {
   faqActiveA: 'Un cliente activo es cualquier cliente de tu espacio de trabajo; una tarea activa es cualquier tarea que exista en un tablero. Los límites cuentan lo que hay ahora mismo en el espacio de trabajo: nunca se borra nada por ti.',
   faqCancelQ: '¿Puedo cancelar cuando quiera?',
   faqCancelA: 'Sí, desde el portal de facturación. Tu espacio de trabajo pasa a los límites del plan Gratis al final del período de facturación y tus datos nunca se eliminan.',
-  faqSeatsQ: '¿Un colaborador en varios espacios de trabajo paga dos veces?',
-  faqSeatsA: 'Cada espacio de trabajo paga sus propios puestos. Un colaborador que trabaja en dos espacios es un puesto en cada uno: la misma cuenta, facturada por cada espacio que lo invita.',
+  faqSeatsQ: '¿Cuesta más añadir a alguien del equipo?',
+  faqSeatsA: 'No. Cada plan incluye un número de puestos, e invitar gente no cuesta nada hasta que los agotes: un estudio de 4 personas y uno de 19 pagan lo mismo en Studio. Un colaborador que trabaja en dos espacios ocupa un puesto en cada uno, pero ninguno paga más por ello.',
+  faqCapQ: '¿Qué pasa cuando llego al límite de puestos?',
+  faqCapA: 'Las nuevas invitaciones dejan de aceptarse hasta que mejores el plan o liberes un puesto. Nada se rompe y no se elimina a nadie: Studio cubre hasta 20 personas y Agency no tiene límite de puestos.',
 }
 
 export default { en, es }

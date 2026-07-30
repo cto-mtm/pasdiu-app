@@ -65,12 +65,16 @@ const reasonText = computed<string>(() => {
 // loads (same convention as useEntitlements — never block paint on billing).
 const currentPlan = computed<Plan>(() => auth.org?.plan ?? 'free')
 
-// Per-seat/month display price for the selected interval (annual = the
-// discounted per-month rate, billed annually).
+// Flat per-workspace price for the selected interval. Monthly shows the
+// monthly charge; annual shows the whole-year total (10 × monthly), so the
+// qualifier below has to switch units with it.
 function priceFor(plan: 'studio' | 'agency'): number {
   const p = PLAN_PRICING[plan]
-  return interval.value === 'year' ? p.priceAnnual : p.priceMonthly
+  return interval.value === 'year' ? p.priceAnnualTotal : p.priceMonthly
 }
+const priceQualifier = computed(() =>
+  interval.value === 'year' ? t('pricing.perYr') : t('pricing.perMo'),
+)
 
 interface Tier {
   id: TierId
@@ -100,10 +104,10 @@ const tiers = computed<Tier[]>(() => {
       id: 'studio',
       name: t('pricing.tierStudio'),
       price: t('pricing.priceAmount', { price: priceFor('studio') }),
-      qualifier: t('pricing.perSeatMo'),
+      qualifier: priceQualifier.value,
       bullets: [
         t('pricing.featSeatsUpTo', { n: L.studio.seats }),
-        t('pricing.featClients', { n: L.studio.clients }),
+        t('pricing.featClientsUnlimited'),
         t('pricing.featTasks', { n: n(L.studio.tasks) }),
         t('pricing.featClientUsers'),
         t('pricing.featLedger'),
@@ -114,9 +118,9 @@ const tiers = computed<Tier[]>(() => {
       id: 'agency',
       name: t('pricing.tierAgency'),
       price: t('pricing.priceAmount', { price: priceFor('agency') }),
-      qualifier: t('pricing.perSeatMo'),
+      qualifier: priceQualifier.value,
       bullets: [
-        t('pricing.featSeatsUpTo', { n: L.agency.seats }),
+        t('pricing.featSeatsUnlimited'),
         t('pricing.featClientsUnlimited'),
         t('pricing.featTasksUnlimited'),
         t('pricing.featClientUsers'),
@@ -145,6 +149,7 @@ const faqs = computed(() => [
   { q: t('pricing.faqActiveQ'), a: t('pricing.faqActiveA') },
   { q: t('pricing.faqCancelQ'), a: t('pricing.faqCancelA') },
   { q: t('pricing.faqSeatsQ'), a: t('pricing.faqSeatsA') },
+  { q: t('pricing.faqCapQ'), a: t('pricing.faqCapA') },
 ])
 
 // Same checkout pattern as the Settings billing card: full-page redirect to

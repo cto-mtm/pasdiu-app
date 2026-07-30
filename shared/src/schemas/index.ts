@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { MAX_STAGE_DURATION_HOURS, MAX_STAGES, STAGE_NAME_MAX } from '../workflow.js'
 
 export const RoleSchema = z.enum(['admin', 'pm', 'contractor', 'client'])
 
@@ -20,15 +21,20 @@ export const AcceptInviteSchema = z.object({
 
 // ── Deliverables & Workflow schemas ──────────────────────────────────────────
 
+// Bounds come from ./workflow.js so the editor's inputs, this schema and the
+// batch endpoint's clamp can never disagree about the same number.
 export const WorkflowStageSchema = z.object({
   id: z.string().min(1),
-  name: z.string().min(1).max(60),
+  name: z.string().min(1).max(STAGE_NAME_MAX),
   optional: z.boolean(),
   clientFacing: z.boolean(),
+  // Defaulted, not required: pipelines written before durations existed parse
+  // as 0-hour stages, which reproduces the old same-date-for-every-task math.
+  durationHours: z.number().int().min(0).max(MAX_STAGE_DURATION_HOURS).default(0),
 })
 
 export const WorkflowPipelineSchema = z.object({
-  stages: z.array(WorkflowStageSchema).min(1).max(20),
+  stages: z.array(WorkflowStageSchema).min(1).max(MAX_STAGES),
 })
 
 export const DeliverableTypeInputSchema = z.object({
@@ -48,6 +54,11 @@ export const BatchCreateDeliverableSchema = z.object({
   skipStageIds: z.array(z.string()).optional(),
   dueStartAt: z.string().optional(),
   dueEndAt: z.string().optional(),
+  // How each deliverable's anchor date is read once stage durations chain off
+  // it: 'end' back-schedules so the LAST stage lands on the date (the meaning
+  // "Due by" has always had, hence the default), 'start' runs forward so the
+  // FIRST stage begins there. With every duration at 0 the two are identical.
+  scheduleMode: z.enum(['start', 'end']).default('end'),
 }).refine(
   (d) => d.subGroupId || d.subGroupName,
   { message: 'Either subGroupId or subGroupName is required' }

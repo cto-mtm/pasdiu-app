@@ -77,12 +77,12 @@ describe("POST /orgs/:orgId/reconcile", () => {
     expect(res.body).toEqual({
       orgId: ORG,
       healed: true,
-      before: { seats: 9, activeClients: 0, activeTasks: 99 },
-      after: { seats: 3, activeClients: 2, activeTasks: 3 },
+      before: { seats: 9, activeClients: 0, activeTasks: 99, activeDeliverables: 0 },
+      after: { seats: 3, activeClients: 2, activeTasks: 3, activeDeliverables: 0 },
     });
 
     const usage = await getFirestore().doc(`orgs/${ORG}/usage/current`).get();
-    expect(usage.data()).toEqual({ seats: 3, activeClients: 2, activeTasks: 3 });
+    expect(usage.data()).toEqual({ seats: 3, activeClients: 2, activeTasks: 3, activeDeliverables: 0 });
   });
 
   it("reports healed: false when the counters are already correct", async () => {
@@ -91,11 +91,28 @@ describe("POST /orgs/:orgId/reconcile", () => {
     expect(res.status).toBe(200);
     expect(res.body.healed).toBe(false);
     expect(res.body.before).toEqual(res.body.after);
-    expect(res.body.after).toEqual({ seats: 1, activeClients: 0, activeTasks: 0 });
+    expect(res.body.after).toEqual({ seats: 1, activeClients: 0, activeTasks: 0, activeDeliverables: 0 });
   });
 });
 
 describe("reconcileOrg (direct call — the scheduled job's core)", () => {
+  it("excludes CLIENT members from the seat recount", async () => {
+    // The healer overwrites `seats` from reality, so if it counted reviewers it
+    // would silently undo the accept path's not-a-seat accounting and shove
+    // paid orgs over their cap. 2 team + 2 reviewers must recount to 2.
+    await seedMember(ORG, "u-rec-team", "contractor");
+    await seedMember(ORG, "u-rec-rev1", "client");
+    await seedMember(ORG, "u-rec-rev2", "client");
+    await seedUsage(ORG, { seats: 4 }); // wrong on purpose: counted reviewers
+
+    const result = await reconcileOrg(ORG);
+    expect(result.healed).toBe(true);
+    expect(result.after.seats).toBe(2); // OWNER (admin) + the contractor
+
+    const usage = await getFirestore().doc(`orgs/${ORG}/usage/current`).get();
+    expect(usage.get("seats")).toBe(2);
+  });
+
   it("recounts and corrects a drifted org", async () => {
     await seedOrg("org-direct");
     await seedMember("org-direct", "u-rec-d1", "admin");
@@ -107,11 +124,11 @@ describe("reconcileOrg (direct call — the scheduled job's core)", () => {
     expect(result).toEqual({
       orgId: "org-direct",
       healed: true,
-      before: { seats: 1, activeClients: 5, activeTasks: 2 },
-      after: { seats: 2, activeClients: 1, activeTasks: 0 },
+      before: { seats: 1, activeClients: 5, activeTasks: 2, activeDeliverables: 0 },
+      after: { seats: 2, activeClients: 1, activeTasks: 0, activeDeliverables: 0 },
     });
 
     const usage = await getFirestore().doc("orgs/org-direct/usage/current").get();
-    expect(usage.data()).toEqual({ seats: 2, activeClients: 1, activeTasks: 0 });
+    expect(usage.data()).toEqual({ seats: 2, activeClients: 1, activeTasks: 0, activeDeliverables: 0 });
   });
 });

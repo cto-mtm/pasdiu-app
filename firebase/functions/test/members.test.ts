@@ -92,6 +92,23 @@ describe("DELETE /orgs/:orgId/members/:uid", () => {
     expect(usage.get("seats")).toBe(1);
   });
 
+  it("removing a CLIENT member does not free a seat", async () => {
+    // Mirrors the accept path: a reviewer never incremented `seats`, so
+    // removing one must not decrement it — otherwise churning reviewers
+    // manufactures free team seats.
+    await seedMember(ORG, "u-mem-reviewer", "client");
+    await seedUsage(ORG, { seats: 1 });
+    const token = await makeUserToken({ uid: OWNER, email: "owner-a@test.dev" });
+
+    const res = await del(`/orgs/${ORG}/members/u-mem-reviewer`, token);
+    expect(res.status).toBe(204);
+
+    const db = getFirestore();
+    expect((await db.doc(`orgs/${ORG}/members/u-mem-reviewer`).get()).exists).toBe(false);
+    const usage = await db.doc(`orgs/${ORG}/usage/current`).get();
+    expect(usage.get("seats")).toBe(1); // unchanged
+  });
+
   it("409s when removing the org owner; the membership stays intact", async () => {
     await seedMember(ORG, "u-mem-pm", "pm");
     await seedUsage(ORG, { seats: 2 });

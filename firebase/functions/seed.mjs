@@ -13,6 +13,7 @@
 // scenario that drives the org switcher). users/{uid} docs are identity-only;
 // role/clientId live on orgs/{orgId}/members/{uid}.
 import admin from "firebase-admin";
+import { DEFAULT_PIPELINE_STAGES, atDueHour, stageDueDates } from "@pasdiu/shared";
 
 // Point the Admin SDK at the emulators (defaults match firebase.json).
 process.env.FIRESTORE_EMULATOR_HOST ||= "127.0.0.1:8080";
@@ -44,11 +45,11 @@ const userByUid = (uid) => USERS.find((u) => u.uid === uid);
  * Plans are deliberately split:
  *  - o_pasdiu is on the paid STUDIO plan → seat room for the invite flow and
  *    a paid-plan org to exercise the paid UI in dev.
- *  - o_northlight stays FREE and AT its 2-seat limit ON PURPOSE — it demos
+ *  - o_northlight stays FREE and AT its 3-seat limit ON PURPOSE — it demos
  *    the seat gate + upsell (invites there are denied by the rules).
  */
-const FREE_PLAN = { plan: "free", seatLimit: 2, clientLimit: 3, taskLimit: 500, deliverableLimit: 50, subscriptionStatus: "none" };
-const STUDIO_PLAN = { plan: "studio", seatLimit: 15, clientLimit: 25, taskLimit: 10000, deliverableLimit: 2000, subscriptionStatus: "active" };
+const FREE_PLAN = { plan: "free", seatLimit: 3, clientLimit: 3, taskLimit: 500, deliverableLimit: 50, subscriptionStatus: "none" };
+const STUDIO_PLAN = { plan: "studio", seatLimit: 20, clientLimit: -1, taskLimit: 10000, deliverableLimit: 2000, subscriptionStatus: "active" };
 
 const ORGS = [
   {
@@ -68,13 +69,14 @@ const ORGS = [
     id: "o_northlight",
     name: "Northlight Post",
     ownerUid: "u_north",
-    // Free plan, 2 members = AT the seat limit ON PURPOSE: inviting from
+    // Free plan, 3 members = AT the seat limit ON PURPOSE: inviting from
     // Northlight demos the seat gate + upsell. Use Pasdiu Studio to demo a
     // working invite flow.
     billing: FREE_PLAN,
     members: [
       { uid: "u_north", role: "admin" },
       { uid: "u_editor", role: "contractor" }, // shared contractor — second workspace
+      { uid: "u_editor2", role: "contractor" }, // fills the 3rd free seat
     ],
   },
 ];
@@ -97,15 +99,7 @@ async function seedUsers() {
 
 async function seedOrgs() {
   const batch = db.batch();
-  const DEFAULT_PIPELINE = {
-    stages: [
-      { id: "s_discovery", name: "Discovery", optional: true, clientFacing: false },
-      { id: "s_capture", name: "Capture", optional: false, clientFacing: false },
-      { id: "s_edit", name: "Edit", optional: false, clientFacing: false },
-      { id: "s_review", name: "Review", optional: false, clientFacing: true },
-      { id: "s_approval", name: "Approval", optional: false, clientFacing: true },
-    ],
-  };
+  const DEFAULT_PIPELINE = { stages: DEFAULT_STAGES };
   for (const org of ORGS) {
     batch.set(db.doc(`orgs/${org.id}`), {
       name: org.name,
@@ -132,8 +126,10 @@ async function seedOrgs() {
       batch.set(db.doc(`orgs/${org.id}/members/${m.uid}`), member);
     }
     // Entitlement counters: real counts derived from the seeded arrays below.
+    // `seats` counts TEAM members only — client-role reviewers are free and
+    // unlimited on every plan, so they never occupy a seat.
     batch.set(db.doc(`orgs/${org.id}/usage/current`), {
-      seats: org.members.length,
+      seats: org.members.filter((m) => m.role !== "client").length,
       activeClients: CLIENTS.filter((c) => c.orgId === org.id).length,
       activeTasks: TASKS.filter((t) => subGroupOf(t.sg).orgId === org.id).length,
       activeDeliverables: DELIVERABLES.filter((d) => d.orgId === org.id && d.status === "active").length,
@@ -144,6 +140,11 @@ async function seedOrgs() {
 
 const now = Date.now();
 const days = (n) => new Date(now + n * 86400000);
+// Due dates are calendar days, pinned to the shared DUE_HOUR_UTC convention
+// (see shared/src/workflow.ts) — the same one the batch endpoint writes, so
+// seeded work renders on the intended day in every timezone. `days()` stays
+// as-is for true instants: createdAt, completedAt, session start/end times.
+const dueDay = (n) => atDueHour(days(n));
 
 /** Clients → Projects → Sub-Groups → Tasks (+ versions + threaded notes). */
 // Every domain doc carries its org's id (required + immutable in the rules).
@@ -215,23 +216,28 @@ const DELIVERABLE_TYPES = [
   { id: "dt_clip_north", orgId: "o_northlight", name: "Clip", weight: 1, order: 2 },
 ];
 
-// Default pipeline stages (snapshot stored on each deliverable at creation).
-const DEFAULT_STAGES = [
-  { id: "s_discovery", name: "Discovery", optional: true, clientFacing: false },
-  { id: "s_capture", name: "Capture", optional: false, clientFacing: false },
-  { id: "s_edit", name: "Edit", optional: false, clientFacing: false },
-  { id: "s_review", name: "Review", optional: false, clientFacing: true },
-  { id: "s_approval", name: "Approval", optional: false, clientFacing: true },
-];
+// Default pipeline stages — seeded onto each org AND snapshotted onto each
+// deliverable at creation, from the same constant real org creation uses.
+const DEFAULT_STAGES = DEFAULT_PIPELINE_STAGES;
 
 // Demo deliverables — a few in Pasdiu Studio to demonstrate the model.
 // Each deliverable has stage-tasks that link back via deliverableId + stageId.
+//
+// `dueInDays` is the deliverable's ANCHOR: its stage deadlines are chained
+// backwards from it by the stages' durations (scheduleMode 'end'), exactly as
+// the batch endpoint does. Staggering the anchors mirrors a batch created
+// across a due window.
+//
+// `skipStageIds` may only ever name OPTIONAL stages — the endpoint rejects
+// skipping a required one, because a required stage with no task reads as the
+// deliverable's current stage forever.
 const DELIVERABLES = [
-  { id: "del_1", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 01 — Teaser", status: "active", clientVisible: true, order: 0, versions: 2 },
-  { id: "del_2", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 02 — Product hero", status: "active", clientVisible: true, order: 1, versions: 3 },
-  { id: "del_3", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 03 — Testimonial", status: "active", clientVisible: false, order: 2, versions: 0 },
-  { id: "del_4", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_yt", subGroupName: "YouTube Cutdowns", typeId: "dt_longform_pasdiu", name: "60s Cutdown", status: "delivered", clientVisible: true, order: 0, versions: 2, approvedBy: "u_client", approvedVia: "portal", approvalNote: "Looks great — approved!" },
-  { id: "del_5", orgId: "o_northlight", clientId: "c_beacon", projectId: "p_roast", subGroupId: "sg_spots", subGroupName: "Launch Spots", typeId: "dt_short_north", name: "Spot 01 — Roast reveal", status: "active", clientVisible: true, order: 0, versions: 1 },
+  { id: "del_1", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 01 — Teaser", status: "active", clientVisible: true, order: 0, versions: 2, dueInDays: 6 },
+  { id: "del_2", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 02 — Product hero", status: "active", clientVisible: true, order: 1, versions: 3, dueInDays: 9 },
+  // Skips the optional Discovery stage: four stage-tasks, not five.
+  { id: "del_3", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 03 — Testimonial", status: "active", clientVisible: false, order: 2, versions: 0, dueInDays: 12, skipStageIds: ["s_discovery"] },
+  { id: "del_4", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_yt", subGroupName: "YouTube Cutdowns", typeId: "dt_longform_pasdiu", name: "60s Cutdown", status: "delivered", clientVisible: true, order: 0, versions: 2, dueInDays: -4, approvedBy: "u_client", approvedVia: "portal", approvalNote: "Looks great — approved!" },
+  { id: "del_5", orgId: "o_northlight", clientId: "c_beacon", projectId: "p_roast", subGroupId: "sg_spots", subGroupName: "Launch Spots", typeId: "dt_short_north", name: "Spot 01 — Roast reveal", status: "active", clientVisible: true, order: 0, versions: 1, dueInDays: 8 },
 ];
 
 // ── Packages — what the agency sold to the client (type × quantity × period).
@@ -340,7 +346,7 @@ async function seedData() {
       deliveryNote: t.deliveryNote ?? "",
       meta: t.versions > 0 ? [{ label: "Format", value: "MP4 / H.264" }] : [],
       order: t.order,
-      dueAt: days(t.due),
+      dueAt: dueDay(t.due),
       createdAt: days(-10),
       completedAt: done ? days(t.due) : null,
       deliverableId: "",
@@ -412,11 +418,17 @@ async function seedData() {
   // Stage-tasks: one task per stage per deliverable (mirrors what the batch-
   // create endpoint does). These populate the "Stage tasks" section and make
   // stages clickable.
+  //
+  // Deadlines come from the SAME stageDueDates() the endpoint uses, chained
+  // off each deliverable's anchor — so the demo shows the real per-stage
+  // schedule instead of an invented ladder that would drift from production.
   const stBatch = db.batch();
   const stageStatuses = ["done", "done", "in_progress", "backlog", "backlog"];
   const stageAssignees = ["u_editor", "u_editor", "u_editor2", "u_editor2", "u_editor"];
   for (const d of DELIVERABLES) {
-    const stages = DEFAULT_STAGES;
+    const skip = new Set(d.skipStageIds ?? []);
+    const stages = DEFAULT_STAGES.filter((s) => !skip.has(s.id));
+    const stageDue = stageDueDates(stages, dueDay(d.dueInDays), "end");
     for (let si = 0; si < stages.length; si++) {
       const stage = stages[si];
       // For delivered deliverables, all stages are done.
@@ -439,7 +451,7 @@ async function seedData() {
         deliveryNote: "",
         meta: [],
         order: si,
-        dueAt: days(si * 2),
+        dueAt: stageDue[si],
         createdAt: days(-10),
         completedAt: done ? days(-5 + si) : null,
         deliverableId: d.id,

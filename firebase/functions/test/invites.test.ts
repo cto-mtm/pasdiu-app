@@ -15,6 +15,7 @@ import {
   seedInvite,
   seedMember,
 } from "./helpers.js";
+import { PLAN_LIMITS } from "../src/plans.js";
 
 const ORG = "org-a";
 
@@ -126,7 +127,9 @@ describe("POST /orgs/:orgId/invites/:inviteId/accept", () => {
     expect(res.status).toBe(401);
   });
 
-  it("creates the membership from the invite, bumps seats, marks accepted", async () => {
+  it("creates a CLIENT membership without taking a seat, marks accepted", async () => {
+    // Reviewers are free and unlimited on every plan (BUSINESS_MODEL §3), so
+    // this path must create the member and leave `seats` alone.
     await seedInvite(ORG, "inv-accept", {
       email: "inv-accept@test.dev",
       role: "client",
@@ -157,10 +160,40 @@ describe("POST /orgs/:orgId/invites/:inviteId/accept", () => {
     expect(member.get("joinedAt")).toBeTruthy();
 
     const usage = await db.doc(`orgs/${ORG}/usage/current`).get();
-    expect(usage.get("seats")).toBe(2); // 1 (owner) + the new member
+    expect(usage.get("seats")).toBe(1); // unchanged — a reviewer is not a seat
 
     const invite = await db.doc(`orgs/${ORG}/invites/inv-accept`).get();
     expect(invite.get("status")).toBe("accepted");
+  });
+
+  it("bumps seats for a TEAM-role invite", async () => {
+    await seedInvite(ORG, "inv-team", { email: "inv-team@test.dev", role: "contractor" });
+    const token = await makeUserToken({ uid: "u-inv-team", email: "inv-team@test.dev" });
+
+    const res = await post(`/orgs/${ORG}/invites/inv-team/accept`, token);
+    expect(res.status).toBe(200);
+
+    const usage = await getFirestore().doc(`orgs/${ORG}/usage/current`).get();
+    expect(usage.get("seats")).toBe(2); // 1 (owner) + the new team member
+  });
+
+  it("accepts a CLIENT invite even when the org is AT its seat limit", async () => {
+    // The whole point of free reviewers: a full team must not block the portal.
+    await seedUsage(ORG, { seats: PLAN_LIMITS.free.seatLimit });
+    await seedInvite(ORG, "inv-cl-full", {
+      email: "inv-cl-full@test.dev",
+      role: "client",
+      clientId: "c-9",
+    });
+    const token = await makeUserToken({ uid: "u-inv-cl-full", email: "inv-cl-full@test.dev" });
+
+    const res = await post(`/orgs/${ORG}/invites/inv-cl-full/accept`, token);
+    expect(res.status).toBe(200);
+
+    const db = getFirestore();
+    expect((await db.doc(`orgs/${ORG}/members/u-inv-cl-full`).get()).exists).toBe(true);
+    const usage = await db.doc(`orgs/${ORG}/usage/current`).get();
+    expect(usage.get("seats")).toBe(PLAN_LIMITS.free.seatLimit); // still at, not over
   });
 
   it("is idempotent: a second accept is 200 with no double seat increment", async () => {
@@ -178,8 +211,10 @@ describe("POST /orgs/:orgId/invites/:inviteId/accept", () => {
   });
 
   it("409s with seat_limit when usage.seats == org.seatLimit", async () => {
-    // Free plan seatLimit is 2 (seedOrg default) — put the org AT the limit.
-    await seedUsage(ORG, { seats: 2 });
+    // seedOrg uses the Free seatLimit — put the org AT it. Read the constant
+    // rather than hardcoding, so a plan-limit change can't silently un-test
+    // this path (it did: the old literal 2 stopped being the limit at 3 seats).
+    await seedUsage(ORG, { seats: PLAN_LIMITS.free.seatLimit });
     await seedInvite(ORG, "inv-full", { email: "inv-full@test.dev" });
     const token = await makeUserToken({ uid: "u-inv-full", email: "inv-full@test.dev" });
 

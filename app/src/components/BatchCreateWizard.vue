@@ -9,6 +9,8 @@ import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 import { useBusy } from '../composables/useBusy'
 import { apiFetch } from '../lib/api'
+import { fromDateInputValue } from '../lib/dates'
+import { stageDueDates } from '../lib/types'
 import type { WorkflowStage } from '../lib/types'
 import BaseButton from './BaseButton.vue'
 import BaseInput from './BaseInput.vue'
@@ -21,7 +23,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close: []; created: [ids: string[]] }>()
 
-const { t } = useI18n()
+const { t, d } = useI18n()
 const data = useDataStore()
 const auth = useAuthStore()
 const toast = useToastStore()
@@ -44,9 +46,10 @@ const subGroupName = ref('')
 // Step 3: Per-stage assignees
 const stageAssignees = ref<Record<string, string[]>>({})
 
-// Step 4: Due window
+// Step 4: Due window + how each deliverable's date anchors its stage deadlines
 const dueStartAt = ref('')
 const dueEndAt = ref('')
+const scheduleMode = ref<'start' | 'end'>('end')
 
 // Step 5: Preview + confirm (computed)
 
@@ -58,6 +61,31 @@ const teamMembers = computed(() => data.teamMembers)
 const pipeline = computed<WorkflowStage[]>(() => {
   const orgDoc = auth.org
   return orgDoc?.pipeline?.stages ?? []
+})
+
+// Total stage time. At 0 the pipeline has no durations set, so every task of a
+// deliverable falls on its anchor date and the start/deadline choice is moot.
+const pipelineTotalHours = computed(() =>
+  pipeline.value.reduce((sum, s) => sum + (s.durationHours || 0), 0),
+)
+
+// Schedule preview for the FIRST deliverable. Uses the batch endpoint's own
+// scheduling function, so the dates shown are the dates that get written — a
+// preview computed by a second implementation would drift and lie. Its anchor
+// is the window's start when a window is given (later deliverables interpolate
+// toward dueEndAt), otherwise the lone "Due by" date; a start date on its own
+// doesn't anchor anything server-side, so there is nothing to preview.
+const schedulePreview = computed(() => {
+  const anchorValue = dueStartAt.value && dueEndAt.value
+    ? dueStartAt.value
+    : dueEndAt.value
+  const anchor = fromDateInputValue(anchorValue)
+  if (!anchor) return []
+
+  const dates = stageDueDates(pipeline.value, anchor, scheduleMode.value)
+  return pipeline.value
+    .map((stage, i) => ({ id: stage.id, name: stage.name, date: dates[i] }))
+    .filter((row): row is { id: string; name: string; date: Date } => row.date !== null)
 })
 
 // Generated names from count + pattern.
@@ -77,6 +105,7 @@ const plan = computed(() => ({
   clientVisible: false,
   dueStartAt: dueStartAt.value || undefined,
   dueEndAt: dueEndAt.value || undefined,
+  scheduleMode: scheduleMode.value,
   // Computed preview info:
   deliverableCount: count.value,
   taskCount: count.value * pipeline.value.length,
@@ -148,6 +177,7 @@ async function submit() {
     if (Object.keys(filtered).length) body.stageAssignees = filtered
     if (dueStartAt.value) body.dueStartAt = dueStartAt.value
     if (dueEndAt.value) body.dueEndAt = dueEndAt.value
+    body.scheduleMode = scheduleMode.value
 
     const result = await apiFetch<{ deliverableIds: string[]; deliverableCount: number; taskCount: number }>(
       `/orgs/${orgId}/deliverables/batch`,
@@ -175,6 +205,7 @@ function resetAndClose() {
   stageAssignees.value = {}
   dueStartAt.value = ''
   dueEndAt.value = ''
+  scheduleMode.value = 'end'
   emit('close')
 }
 
@@ -255,6 +286,39 @@ watch(() => props.open, (open) => {
           <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('batchCreate.dueEnd') }}</span>
           <BaseInput v-model="dueEndAt" type="date" />
         </label>
+
+        <!-- How each deliverable's date anchors its stage deadlines. Only
+             changes anything once stages have durations. -->
+        <div>
+          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('batchCreate.scheduleModeLabel') }}</span>
+          <div class="flex flex-wrap gap-3">
+            <label class="flex items-center gap-1">
+              <input v-model="scheduleMode" type="radio" value="end" />
+              <span class="text-sm" style="color: var(--text);">{{ t('batchCreate.scheduleModeEnd') }}</span>
+            </label>
+            <label class="flex items-center gap-1">
+              <input v-model="scheduleMode" type="radio" value="start" />
+              <span class="text-sm" style="color: var(--text);">{{ t('batchCreate.scheduleModeStart') }}</span>
+            </label>
+          </div>
+        </div>
+
+        <p class="text-xs" style="color: var(--text-muted);">
+          {{ pipelineTotalHours > 0 ? t('batchCreate.scheduleHint') : t('batchCreate.noDurationsHint') }}
+        </p>
+
+        <!-- The dates that will actually be written, for the first deliverable. -->
+        <div v-if="schedulePreview.length" class="rounded-lg border p-3" style="background: var(--surface-2); border-color: var(--border);">
+          <p class="mb-2 text-xs font-medium" style="color: var(--text);">
+            {{ t('batchCreate.schedulePreviewTitle', { name: generatedNames[0] }) }}
+          </p>
+          <dl class="space-y-1 text-xs">
+            <div v-for="row in schedulePreview" :key="row.id" class="flex justify-between gap-4">
+              <dt class="truncate" style="color: var(--text-muted);">{{ row.name }}</dt>
+              <dd style="color: var(--text);">{{ d(row.date, 'short') }}</dd>
+            </div>
+          </dl>
+        </div>
       </div>
 
       <!-- Step 5: Preview -->

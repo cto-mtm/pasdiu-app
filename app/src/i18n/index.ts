@@ -11,6 +11,7 @@ import shell from './locales/components/shell'
 import search from './locales/components/search'
 import brief from './locales/components/brief'
 import batchCreate from './locales/components/batchCreate'
+import workflow from './locales/components/workflow'
 import packages from './locales/components/packages'
 // `import` is a reserved word — alias the binding, keep the registered key.
 import importMessages from './locales/components/import'
@@ -50,6 +51,7 @@ const messages = {
     search: search.en,
     brief: brief.en,
     batchCreate: batchCreate.en,
+    workflow: workflow.en,
     packages: packages.en,
     import: importMessages.en,
     tour: tour.en,
@@ -83,6 +85,7 @@ const messages = {
     search: search.es,
     brief: brief.es,
     batchCreate: batchCreate.es,
+    workflow: workflow.es,
     packages: packages.es,
     import: importMessages.es,
     tour: tour.es,

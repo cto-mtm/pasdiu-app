@@ -86,10 +86,9 @@ billingRouter.post(
     const db = getFirestore();
     await requireManagerOf(db, orgId, user.uid);
     const orgRef = db.doc(`orgs/${orgId}`);
-    const [orgSnap, usageSnap] = await Promise.all([
-      orgRef.get(),
-      db.doc(`orgs/${orgId}/usage/current`).get(),
-    ]);
+    // No usage read here: flat pricing means checkout never depends on the
+    // current seat count (see the quantity note below).
+    const orgSnap = await orgRef.get();
     if (!orgSnap.exists) throw new ApiError(404, "Org not found");
 
     // Resolve the price BEFORE touching Stripe customers: an unresolved slot
@@ -110,12 +109,14 @@ billingRouter.post(
       await orgRef.update({ stripeCustomerId: customerId });
     }
 
-    const seats = usageSnap.get("seats");
-    const quantity = Math.max(typeof seats === "number" ? seats : 0, 1);
+    // Flat per-workspace pricing (BUSINESS_MODEL §2): always exactly one unit
+    // of the plan. Seats are a cap enforced on invite accept, never a billed
+    // quantity — sending the seat count would multiply the flat price by the
+    // size of the team, which is the entire thing this model removes.
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
-      line_items: [{ price: priceId, quantity }],
+      line_items: [{ price: priceId, quantity: 1 }],
       subscription_data: { metadata: { orgId, plan } },
       metadata: { orgId, plan },
       success_url: `${returnOrigin(req)}/settings?billing=success`,

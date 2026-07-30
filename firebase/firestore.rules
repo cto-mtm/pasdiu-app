@@ -201,6 +201,9 @@ service cloud.firestore {
       // revoke (status → 'revoked') or delete. Seat gate: the seat limit
       // fires at invite time (usage.seats < org.seatLimit, -1 = unlimited);
       // the accept endpoint re-checks it server-side (409 seat_limit).
+      // CLIENT-role invites skip the gate entirely — reviewers are free and
+      // unlimited on every plan (BUSINESS_MODEL §3), so an org sitting at its
+      // seat cap must still be able to invite them.
       // Keys are deliberately NOT constrained here, so the app's optional
       // `locale` field ('en'|'es', drives the invite-email language) — and
       // future additive fields — pass without a rules change.
@@ -210,7 +213,7 @@ service cloud.firestore {
           && request.resource.data.status == 'pending'
           && validRole(request.resource.data.role)
           && request.resource.data.email == request.resource.data.email.lower()
-          && underSeatLimit(orgId);
+          && (request.resource.data.role == 'client' || underSeatLimit(orgId));
         allow update: if isManagerOf(orgId)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
           && request.resource.data.status == 'revoked';

@@ -53,18 +53,20 @@ before(async () => {
 
     // Org A — mgr (OWNER) + mgr2 manage; ed/ed2 contract; cl is the client of
     // tenant c1. Deliberately AT its limits: 2 clients (c1, c2), 2 tasks
-    // (t1, tx) and 5 seats are seeded, and usage/current mirrors those counts
+    // (t1, tx) and 4 seats are seeded, and usage/current mirrors those counts
     // — every gated create in o_a must be denied.
+    // NOTE 5 member docs but seats: 4 — `cl` is a client-role reviewer, and
+    // reviewers are free/unlimited on every plan, so they never occupy a seat.
     await setDoc(doc(db, 'orgs/o_a'), {
       name: 'Org A', createdAt: new Date(), ownerUid: 'mgr',
-      plan: 'free', seatLimit: 5, clientLimit: 2, taskLimit: 2, subscriptionStatus: 'none',
+      plan: 'free', seatLimit: 4, clientLimit: 2, taskLimit: 2, subscriptionStatus: 'none',
     })
     await setDoc(doc(db, 'orgs/o_a/members/mgr'), { uid: 'mgr', orgId: 'o_a', orgName: 'Org A', displayName: 'PM', email: 'mgr@x.test', role: 'pm', joinedAt: new Date() })
     await setDoc(doc(db, 'orgs/o_a/members/mgr2'), { uid: 'mgr2', orgId: 'o_a', orgName: 'Org A', displayName: 'PM Two', email: 'mgr2@x.test', role: 'pm', joinedAt: new Date() })
     await setDoc(doc(db, 'orgs/o_a/members/ed'), { uid: 'ed', orgId: 'o_a', orgName: 'Org A', displayName: 'Ed', email: 'ed@x.test', role: 'contractor', joinedAt: new Date() })
     await setDoc(doc(db, 'orgs/o_a/members/ed2'), { uid: 'ed2', orgId: 'o_a', orgName: 'Org A', displayName: 'Nora', email: 'ed2@x.test', role: 'contractor', joinedAt: new Date() })
     await setDoc(doc(db, 'orgs/o_a/members/cl'), { uid: 'cl', orgId: 'o_a', orgName: 'Org A', displayName: 'Cl', email: 'cl@x.test', role: 'client', clientId: 'c1', joinedAt: new Date() })
-    await setDoc(doc(db, 'orgs/o_a/usage/current'), { seats: 5, activeClients: 2, activeTasks: 2 })
+    await setDoc(doc(db, 'orgs/o_a/usage/current'), { seats: 4, activeClients: 2, activeTasks: 2 })
     await setDoc(doc(db, 'orgs/o_a/invites/i1'), { email: 'newbie@x.test', role: 'contractor', status: 'pending', createdAt: new Date(), invitedBy: 'mgr' })
 
     // Org B — ed is the ADMIN here (dual membership with contractor-in-A).
@@ -578,6 +580,24 @@ test('invite create denied at seat limit', async () => {
   }))
 })
 
+// Reviewers are free and unlimited on every plan, so the seat gate must not
+// apply to them — o_a is AT its seat limit and this still has to succeed.
+test('CLIENT invite create allowed at seat limit', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertSucceeds(setDoc(doc(mgr, 'orgs/o_a/invites/i_reviewer'), {
+    email: 'reviewer@x.test', role: 'client', clientId: 'c1', status: 'pending', createdAt: serverTimestamp(), invitedBy: 'mgr',
+  }))
+})
+
+// The role escape hatch is exactly one role wide: it must not become a way to
+// smuggle a team member past a full seat cap.
+test('non-client invite still denied at seat limit even alongside a clientId', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertFails(setDoc(doc(mgr, 'orgs/o_a/invites/i_sneaky'), {
+    email: 'sneaky@x.test', role: 'pm', clientId: 'c1', status: 'pending', createdAt: serverTimestamp(), invitedBy: 'mgr',
+  }))
+})
+
 test('creates allowed when limits are -1 (unlimited org)', async () => {
   const ed = env.authenticatedContext('ed').firestore() // admin of o_b
   // Unlimited waives the LIMIT check, not the paired-increment requirement.
@@ -704,6 +724,14 @@ test('manager can update org pipeline field', async () => {
     pipeline: { stages: [{ id: 's1', name: 'Capture', optional: false, clientFacing: false }] },
   }))
 })
+
+test('non-managers cannot update org pipeline field', async () => {
+  const pipeline = { stages: [{ id: 's1', name: 'Capture', optional: false, clientFacing: false }] };
+  const ed = env.authenticatedContext('ed').firestore();
+  await assertFails(updateDoc(doc(ed, 'orgs/o_a'), { pipeline }));
+  const cl = env.authenticatedContext('cl').firestore();
+  await assertFails(updateDoc(doc(cl, 'orgs/o_a'), { pipeline }));
+});
 
 test('manager cannot update billing fields on org', async () => {
   const mgr = env.authenticatedContext('mgr').firestore()

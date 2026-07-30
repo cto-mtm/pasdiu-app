@@ -1,5 +1,6 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { logger } from "firebase-functions/v2";
+import { TEAM_ROLES } from "./apiErrors.js";
 
 // Usage-counter reconciliation (PAYWALL_PLAN Phase 2/4). The entitlement
 // gates in firestore.rules compare orgs/{orgId}/usage/current against the
@@ -38,15 +39,18 @@ function counterOf(value: unknown): number {
 /**
  * Recount an org's members/clients/tasks with count() aggregate queries
  * (no document reads) and, when the usage doc disagrees, set the corrected
- * counters (merge — the doc may carry future fields). seats = membership
- * docs; activeClients/activeTasks = existing docs stamped with the orgId
- * (the app decrements on delete/cascade, so existence == active).
+ * counters (merge — the doc may carry future fields). seats = membership docs
+ * with a TEAM_ROLES role — client-role reviewers are free and unlimited, so
+ * counting them here would re-inflate the seat count the accept path is
+ * careful not to charge for. activeClients/activeTasks = existing docs stamped
+ * with the orgId (the app decrements on delete/cascade, so existence ==
+ * active).
  */
 export async function reconcileOrg(orgId: string): Promise<ReconcileResult> {
   const db = getFirestore();
   const usageRef = db.doc(`orgs/${orgId}/usage/current`);
   const [membersAgg, clientsAgg, tasksAgg, deliverablesAgg, usageSnap] = await Promise.all([
-    db.collection(`orgs/${orgId}/members`).count().get(),
+    db.collection(`orgs/${orgId}/members`).where("role", "in", TEAM_ROLES).count().get(),
     db.collection("clients").where("orgId", "==", orgId).count().get(),
     db.collection("tasks").where("orgId", "==", orgId).count().get(),
     db.collection("deliverables").where("orgId", "==", orgId).where("status", "==", "active").count().get(),

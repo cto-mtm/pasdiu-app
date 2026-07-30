@@ -7,7 +7,12 @@ import {
   userOf,
   requireManagerOf,
 } from "../helpers/apiErrors.js";
-import { BatchCreateDeliverableSchema } from "@pasdiu/shared";
+import {
+  BatchCreateDeliverableSchema,
+  atDueHour,
+  parseDueDate,
+  stageDueDates,
+} from "@pasdiu/shared";
 
 export const deliverablesRouter = express.Router();
 
@@ -39,7 +44,9 @@ deliverablesRouter.post(
     if (!orgSnap.exists) throw new ApiError(404, "org_not_found");
     const org = orgSnap.data()!;
 
-    const pipeline = org.pipeline as { stages: Array<{ id: string; name: string; optional: boolean; clientFacing: boolean }> } | undefined;
+    // durationHours is optional here on purpose: org docs written before
+    // stage durations existed simply don't carry it, and default to 0.
+    const pipeline = org.pipeline as { stages: Array<{ id: string; name: string; optional: boolean; clientFacing: boolean; durationHours?: number }> } | undefined;
     if (!pipeline || !pipeline.stages.length) {
       throw new ApiError(400, "no_pipeline", "Org has no workflow pipeline configured");
     }
@@ -88,22 +95,40 @@ deliverablesRouter.post(
     if (!projectSnap.exists) throw new ApiError(404, "project_not_found");
     const clientId = (projectSnap.get("clientId") as string) ?? "";
 
-    // Determine stages to create (exclude skipped).
+    // Determine stages to create (exclude skipped). Only OPTIONAL stages may
+    // be skipped: the derived-stage logic treats a required stage with no task
+    // as the deliverable's current stage, so skipping one would wedge it there
+    // permanently (see currentStage in app/src/lib/deliverableStage.ts).
     const skipSet = new Set(input.skipStageIds ?? []);
+    const skippedRequired = pipeline.stages.filter((s) => skipSet.has(s.id) && !s.optional);
+    if (skippedRequired.length) {
+      throw new ApiError(
+        400,
+        "stage_not_optional",
+        { stageIds: skippedRequired.map((s) => s.id) }
+      );
+    }
     const stages = pipeline.stages.filter((s) => !skipSet.has(s.id));
 
-    // Compute due dates: linear interpolation across the due window.
-    let dueDates: (Date | null)[] = new Array(count).fill(null);
-    if (input.dueStartAt && input.dueEndAt) {
-      const start = new Date(input.dueStartAt).getTime();
-      const end = new Date(input.dueEndAt).getTime();
-      dueDates = input.names.map((_, i) => {
-        if (count === 1) return new Date(end);
+    // Per-deliverable ANCHOR dates: linear interpolation across the due window
+    // spreads a batch out (30 videos across July); a lone dueEndAt anchors them
+    // all to the same day. Each deliverable's stage tasks are then scheduled
+    // around its own anchor below.
+    let anchorDates: (Date | null)[] = new Array(count).fill(null);
+    const windowStart = input.dueStartAt ? parseDueDate(input.dueStartAt) : null;
+    const windowEnd = input.dueEndAt ? parseDueDate(input.dueEndAt) : null;
+    if (windowStart && windowEnd) {
+      const start = windowStart.getTime();
+      const end = windowEnd.getTime();
+      anchorDates = input.names.map((_, i) => {
+        if (count === 1) return windowEnd;
         const t = i / (count - 1);
-        return new Date(start + t * (end - start));
+        // Snap back onto 12:00 UTC: an interpolated instant lands at an
+        // arbitrary time of day, and these are calendar dates.
+        return atDueHour(new Date(start + t * (end - start)));
       });
-    } else if (input.dueEndAt) {
-      dueDates = new Array(count).fill(new Date(input.dueEndAt));
+    } else if (windowEnd) {
+      anchorDates = new Array(count).fill(windowEnd);
     }
 
     // Build all documents.
@@ -114,6 +139,9 @@ deliverablesRouter.post(
     for (let i = 0; i < count; i++) {
       const delRef = db.collection("deliverables").doc();
       createdDeliverableIds.push(delRef.id);
+
+      // One deadline per stage, chained off this deliverable's own anchor.
+      const stageDue = stageDueDates(stages, anchorDates[i], input.scheduleMode);
 
       ops.push({
         ref: delRef,
@@ -164,7 +192,7 @@ deliverablesRouter.post(
             deliveryNote: "",
             meta: [],
             order: i * stages.length + si,
-            dueAt: dueDates[i],
+            dueAt: stageDue[si],
             createdAt: FieldValue.serverTimestamp(),
             completedAt: null,
             deliverableId: delRef.id,

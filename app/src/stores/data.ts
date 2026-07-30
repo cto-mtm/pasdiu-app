@@ -27,8 +27,10 @@ import { useToastStore } from './toast'
 import { track } from '../lib/analytics'
 import { mapClient, mapDeliverable, mapInvite, mapMember, mapNote, mapProject, mapSubGroup, mapTask, mapVersion } from '../lib/mappers'
 import { isDoneStatus } from '../lib/status'
+import { WorkflowPipelineSchema } from '../lib/types'
 import type {
   Client, Deliverable, Invite, Project, Role, SubGroup, Task, TaskStatus, Version, Note, UserProfile, MetaField,
+  WorkflowStage,
 } from '../lib/types'
 
 // Run a Firestore write; on failure surface a toast and rethrow so callers can
@@ -407,6 +409,27 @@ export const useDataStore = defineStore('data', () => {
     if (current) usersById.value = { ...usersById.value, [uid]: { ...current, ...patch } }
   }
 
+  // The ACTIVE org's workflow pipeline (managers only; rules gate the org doc
+  // to name/pipeline/defaultCapacityPointsPerDay). No local patch: the auth
+  // store live-subscribes to the org doc, so `auth.org` refreshes itself.
+  // Stage edits only affect FUTURE deliverables — in-flight ones carry their
+  // own stage snapshot taken at creation.
+  //
+  // Validated against the shared schema before it goes anywhere: the rules
+  // gate WHICH keys a manager may change on an org, never the pipeline's
+  // contents, so this is the only thing standing between a UI bug and a
+  // malformed pipeline that would break every future batch create. Writing
+  // `parsed.data` also normalizes it (durationHours defaults to 0).
+  async function updateOrgPipeline(stages: WorkflowStage[]): Promise<void> {
+    const orgId = requireOrgId()
+    const parsed = WorkflowPipelineSchema.safeParse({ stages })
+    if (!parsed.success) {
+      useToastStore().error(i18n.global.t('common.saveError'))
+      throw new Error('invalid pipeline')
+    }
+    await guarded(() => updateDoc(doc(db, 'orgs', orgId), { pipeline: parsed.data }))
+  }
+
   // ── Invites of the ACTIVE org (managers only; rules enforce) ──
   // Pending only — accepted/revoked invites are history, not UI state.
   async function loadInvites(): Promise<void> {
@@ -498,7 +521,11 @@ export const useDataStore = defineStore('data', () => {
     upsert(tasks.value, t)
     return t
   }
-  async function updateTask(id: string, patch: Partial<Pick<Task, 'title' | 'description' | 'meta' | 'assigneeUid' | 'clientVisible' | 'blockedReason' | 'deliveryNote'>>): Promise<void> {
+  // dueAt is included so a manager can override a stage deadline the batch
+  // endpoint derived from the workflow's stage durations — derived dates are a
+  // starting point, not a cage. (The rules already allow managers to write any
+  // task field; contractors and clients are limited to the status set.)
+  async function updateTask(id: string, patch: Partial<Pick<Task, 'title' | 'description' | 'meta' | 'assigneeUid' | 'clientVisible' | 'blockedReason' | 'deliveryNote' | 'dueAt'>>): Promise<void> {
     await guarded(() => updateDoc(doc(db, 'tasks', id), patch))
     const local = getTask(id)
     if (local) Object.assign(local, patch)
@@ -706,7 +733,7 @@ export const useDataStore = defineStore('data', () => {
     loadAllTasks, loadMoreTasks, loadTasksForClient, loadAllTasksForClient,
     loadInvites, createInvite, revokeInvite,
     createClient, createProject, createSubGroup, createTask,
-    updateClient, updateProject, updateProjectBrief, updateMember, updateSubGroup, updateTask,
+    updateClient, updateProject, updateProjectBrief, updateMember, updateOrgPipeline, updateSubGroup, updateTask,
     updateTaskStatus, setProjectTasksVisibility,
     deleteTask, deleteSubGroup, deleteProject, deleteClient,
     loadVersions, loadNotes, addNote, setNoteResolved, addVersion,

@@ -30,6 +30,7 @@ export type AnalyticsEvent =
   | 'onboarding_skipped'
   | 'client_created'
   | 'task_created'
+  | 'pipeline_updated'
   // Conversion funnel: gate → upsell → checkout
   | 'gate_hit'
   | 'upsell_viewed'

@@ -49,7 +49,8 @@ export interface PlanConfig {
   taskLimit: number
   deliverableLimit: number
   priceMonthly: number
-  priceAnnual: number
+  /** Whole-year total (not a per-month equivalent) — 10 × monthly. */
+  priceAnnualTotal: number
 }
 
 export interface BillingConfig {
@@ -200,6 +201,12 @@ export interface WorkflowStage {
   name: string
   optional: boolean
   clientFacing: boolean
+  // How long this stage takes, in whole hours. Stage due dates are derived by
+  // chaining these along the pipeline from the deliverable's anchor date (see
+  // the batch endpoint's scheduleMode). 0 = unset: the stage consumes no time,
+  // so every task falls on the anchor date — the behaviour before durations
+  // existed, which is what pipelines predating this field still get.
+  durationHours: number
 }
 
 export interface WorkflowPipeline {

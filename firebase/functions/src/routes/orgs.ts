@@ -9,11 +9,12 @@ import {
   emailOf,
   requireManagerOf,
   MANAGER_ROLES,
+  TEAM_ROLES,
 } from "../helpers/apiErrors.js";
-import { syncSeatQuantity } from "../helpers/stripeHandlers.js";
 import { reconcileOrg } from "../helpers/reconcile.js";
 import { sendInviteEmailFor } from "../helpers/inviteMail.js";
 import { PLAN_LIMITS } from "../plans.js";
+import { DEFAULT_PIPELINE_STAGES } from "@pasdiu/shared";
 
 export const orgsRouter = express.Router();
 
@@ -140,15 +141,9 @@ orgsRouter.post(
       taskLimit: PLAN_LIMITS.free.taskLimit,
       deliverableLimit: PLAN_LIMITS.free.deliverableLimit,
       subscriptionStatus: "none",
-      pipeline: {
-        stages: [
-          { id: "s_discovery", name: "Discovery", optional: true, clientFacing: false },
-          { id: "s_capture", name: "Capture", optional: false, clientFacing: false },
-          { id: "s_edit", name: "Edit", optional: false, clientFacing: false },
-          { id: "s_review", name: "Review", optional: false, clientFacing: true },
-          { id: "s_approval", name: "Approval", optional: false, clientFacing: true },
-        ],
-      },
+      // Copied onto the org, which then owns it outright — see the note on
+      // DEFAULT_PIPELINE_STAGES about why this is a seed, not a fallback.
+      pipeline: { stages: [...DEFAULT_PIPELINE_STAGES] },
     });
     batch.set(
       db.doc(`users/${user.uid}`),
@@ -323,9 +318,13 @@ orgsRouter.post(
       ) {
         throw new ApiError(404, "Invite not found");
       }
+      // Client-role invites are reviewers: unlimited and free on every plan,
+      // so they neither consume a seat nor can be blocked by the seat gate.
+      const takesSeat = TEAM_ROLES.includes(invite.role);
       const seatLimit = orgSnap.get("seatLimit");
       const seats = usageSnap.get("seats");
       if (
+        takesSeat &&
         typeof seatLimit === "number" && seatLimit !== -1 &&
         typeof seats === "number" && seats >= seatLimit
       ) {
@@ -344,11 +343,9 @@ orgsRouter.post(
       if (invite.clientId) member.clientId = invite.clientId;
       if (invite.title) member.title = invite.title;
       tx.set(memberRef, member);
-      tx.update(usageRef, { seats: FieldValue.increment(1) });
+      if (takesSeat) tx.update(usageRef, { seats: FieldValue.increment(1) });
       tx.update(inviteRef, { status: "accepted" });
     });
-
-    await syncSeatQuantity(db, orgId);
 
     res.json({ orgId });
   })
@@ -378,10 +375,12 @@ orgsRouter.delete(
       const memberSnap = await tx.get(memberRef);
       if (!memberSnap.exists) throw new ApiError(404, "Member not found");
       tx.delete(memberRef);
-      tx.update(usageRef, { seats: FieldValue.increment(-1) });
+      // Mirror the accept path: only team members ever incremented `seats`,
+      // so only they decrement it. Removing a reviewer must not free a seat.
+      if (TEAM_ROLES.includes(memberSnap.get("role"))) {
+        tx.update(usageRef, { seats: FieldValue.increment(-1) });
+      }
     });
-
-    await syncSeatQuantity(db, orgId);
 
     res.status(204).send();
   })
