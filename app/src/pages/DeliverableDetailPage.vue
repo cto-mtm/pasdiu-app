@@ -7,13 +7,18 @@ import { db } from '../lib/firebase'
 import { useDataStore } from '../stores/data'
 import { useAuthStore } from '../stores/auth'
 import { useBusy } from '../composables/useBusy'
-import { mapTask, mapDeliverable } from '../lib/mappers'
+import { mapTask } from '../lib/mappers'
 import { currentStage } from '../lib/deliverableStage'
 import { statusColor, statusKey } from '../lib/status'
-import type { Deliverable, Task, Version, Note, MetaField } from '../lib/types'
+import { priorityKey } from '../lib/priority'
+import { DELIVERABLE_PRIORITIES } from '../lib/types'
+import type { DeliverablePriority, Task, Version, Note, MetaField } from '../lib/types'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
+import BriefDrawer from '../components/BriefDrawer.vue'
+import PriorityBadge from '../components/PriorityBadge.vue'
 import BaseButton from '../components/BaseButton.vue'
 import BaseInput from '../components/BaseInput.vue'
+import BaseSelect from '../components/BaseSelect.vue'
 import Modal from '../components/Modal.vue'
 import ModalFooter from '../components/ModalFooter.vue'
 import MetaEditor from '../components/MetaEditor.vue'
@@ -25,7 +30,10 @@ const auth = useAuthStore()
 const { busy, run } = useBusy()
 
 const deliverableId = computed(() => String(route.params.deliverableId))
-const deliverable = ref<Deliverable | undefined>()
+// Read the STORE's copy rather than keeping a local one: the brief drawer
+// edits deliverable metadata through the store, and a local snapshot would
+// stop tracking it after the first edit made here.
+const deliverable = computed(() => data.getDeliverable(deliverableId.value))
 const stageTasks = ref<Task[]>([])
 const versions = ref<Version[]>([])
 const notes = ref<Note[]>([])
@@ -42,14 +50,18 @@ function toggleStage(stageId: string) {
   }
 }
 
+const briefOpen = ref(false)
+
 // Edit deliverable modal state.
 const showEdit = ref(false)
 const editName = ref('')
 const editMeta = ref<MetaField[]>([])
+const editPriority = ref<DeliverablePriority>('normal')
 
 function openEdit() {
   if (!deliverable.value) return
   editName.value = deliverable.value.name
+  editPriority.value = deliverable.value.priority
   editMeta.value = deliverable.value.meta.map((f) => ({ ...f }))
   showEdit.value = true
 }
@@ -58,10 +70,11 @@ async function saveEdit() {
   await run(async () => {
     const patch = {
       name: editName.value.trim(),
+      priority: editPriority.value,
       meta: editMeta.value.filter((f) => f.label.trim() || f.value.trim()),
     }
+    // updateDeliverable patches the store copy, which `deliverable` reads.
     await data.updateDeliverable(deliverableId.value, patch)
-    deliverable.value = { ...deliverable.value!, ...patch }
     showEdit.value = false
   })
 }
@@ -93,14 +106,13 @@ async function load() {
     await data.loadUsers()
     await data.loadClients()
 
-    // Load the deliverable doc.
-    const { getDoc, doc: docRef } = await import('firebase/firestore')
-    const delSnap = await getDoc(docRef(db, 'deliverables', deliverableId.value))
-    if (!delSnap.exists()) {
+    // Load the deliverable doc. Via the store so the brief drawer (and anything
+    // else on the page) reads the same copy instead of fetching its own.
+    const del = await data.loadDeliverable(deliverableId.value)
+    if (!del) {
       loaded.value = true
       return
     }
-    deliverable.value = mapDeliverable(delSnap.id, delSnap.data())
 
     // Load tasks for this deliverable.
     // The orgId filter is REQUIRED — Firestore rules gate reads on
@@ -108,7 +120,7 @@ async function load() {
     const taskSnap = await getDocs(
       query(
         collection(db, 'tasks'),
-        where('orgId', '==', deliverable.value.orgId),
+        where('orgId', '==', del.orgId),
         where('deliverableId', '==', deliverableId.value),
       )
     )
@@ -126,8 +138,8 @@ async function load() {
       .sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0))
 
     // Load project for breadcrumbs.
-    if (deliverable.value.projectId) {
-      await data.loadProject(deliverable.value.projectId)
+    if (del.projectId) {
+      await data.loadProject(del.projectId)
     }
     loaded.value = true
   } catch {
@@ -159,9 +171,17 @@ onMounted(load)
         {{ deliverable.name }}
       </h1>
       <div class="flex items-center gap-2">
+        <PriorityBadge :priority="deliverable.priority" always />
         <span class="rounded px-2 py-0.5 text-xs font-medium" style="background: var(--surface-2); color: var(--text-muted);">
           {{ deliverable.status }}
         </span>
+        <button
+          class="rounded-lg border px-3 py-1.5 text-sm transition-colors hover:bg-[color:var(--surface-2)]"
+          style="background: var(--surface-2); color: var(--text); border-color: var(--border);"
+          @click="briefOpen = true"
+        >
+          {{ t('brief.open') }}
+        </button>
         <button
           v-if="auth.isManager"
           class="rounded-lg border px-3 py-1.5 text-sm transition-colors hover:bg-[color:var(--surface-2)]"
@@ -327,12 +347,27 @@ onMounted(load)
       </div>
     </div>
 
+    <BriefDrawer
+      :open="briefOpen"
+      :client-id="deliverable.clientId"
+      :project-id="deliverable.projectId"
+      :sub-group-id="deliverable.subGroupId || null"
+      :deliverable-id="deliverable.id"
+      @close="briefOpen = false"
+    />
+
     <!-- Edit deliverable modal -->
     <Modal :open="showEdit" :title="t('deliverableDetail.editTitle')" @close="showEdit = false">
       <form class="space-y-4" @submit.prevent="saveEdit">
         <label class="block">
           <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('deliverableDetail.nameLabel') }}</span>
           <BaseInput v-model="editName" />
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('deliverableDetail.priorityLabel') }}</span>
+          <BaseSelect v-model="editPriority">
+            <option v-for="p in DELIVERABLE_PRIORITIES" :key="p" :value="p">{{ t(priorityKey(p)) }}</option>
+          </BaseSelect>
         </label>
         <div>
           <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('deliverableDetail.metaLabel') }}</span>

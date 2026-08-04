@@ -167,6 +167,9 @@ describe("POST /orgs/:orgId/deliverables/batch", () => {
     assert.equal(del0.get("subGroupId"), "sg-batch");
     assert.equal(del0.get("clientVisible"), true);
     assert.equal(del0.get("status"), "active");
+    // Priority was omitted from the body — the schema default must land as a
+    // real value, not `undefined` (Firestore rejects that and 500s the batch).
+    assert.equal(del0.get("priority"), "normal");
     // Stage snapshot present.
     const stages = del0.get("stages") as unknown[];
     assert.equal(stages.length, 3);
@@ -192,6 +195,39 @@ describe("POST /orgs/:orgId/deliverables/batch", () => {
     // Usage counter incremented.
     const usageSnap = await db.doc(`orgs/${ORG}/usage/current`).get();
     assert.equal(usageSnap.get("activeDeliverables"), 3);
+  });
+
+  it("applies an explicit priority to every deliverable in the batch", async () => {
+    const res = await post(`/orgs/${ORG}/deliverables/batch`, mgrToken, {
+      projectId: PROJECT,
+      subGroupId: "sg-batch",
+      names: ["Rush 1", "Rush 2"],
+      priority: "high",
+    });
+
+    assert.equal(res.status, 201);
+    const db = getFirestore();
+    const snap = await db.collection("deliverables").where("orgId", "==", ORG).get();
+    assert.equal(snap.size, 2);
+    // One priority per batch — every deliverable carries it, not just the first.
+    for (const d of snap.docs) assert.equal(d.get("priority"), "high");
+  });
+
+  it("400 rejects a priority outside the enum", async () => {
+    const res = await post(`/orgs/${ORG}/deliverables/batch`, mgrToken, {
+      projectId: PROJECT,
+      subGroupId: "sg-batch",
+      names: ["Nope"],
+      priority: "urgent",
+    });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, "invalid_body");
+
+    // Nothing written.
+    const db = getFirestore();
+    const snap = await db.collection("deliverables").where("orgId", "==", ORG).get();
+    assert.equal(snap.size, 0);
   });
 
   it("201 creates a new sub-group when subGroupName is provided", async () => {

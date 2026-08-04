@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useDataStore } from '../stores/data'
 import { useAuthStore } from '../stores/auth'
 import { useBusy } from '../composables/useBusy'
 import { useEntitlements } from '../composables/useEntitlements'
-import { TASK_STATUSES } from '../lib/types'
 import type { Project, TaskStatus } from '../lib/types'
-import { statusColor, statusKey } from '../lib/status'
+import { BOARD_COLUMNS, MANUAL_TASK_STATUSES, statusColor, statusKey, type BoardColumn } from '../lib/status'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
 import TaskCard from '../components/TaskCard.vue'
 import BriefDrawer from '../components/BriefDrawer.vue'
@@ -19,6 +18,8 @@ import Modal from '../components/Modal.vue'
 import ModalFooter from '../components/ModalFooter.vue'
 import SegmentedControl from '../components/SegmentedControl.vue'
 import StatusCounts from '../components/StatusCounts.vue'
+import SubGroupMenu from '../components/SubGroupMenu.vue'
+import PriorityBadge from '../components/PriorityBadge.vue'
 import InfoTip from '../components/InfoTip.vue'
 import OverflowMenu from '../components/OverflowMenu.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -38,7 +39,17 @@ const { canCreateTask } = useEntitlements()
 const projectId = computed(() => String(route.params.projectId))
 const project = ref<Project | undefined>()
 const view = ref<'kanban' | 'list' | 'deliverables'>('kanban')
+
+// The brief covers client → project → (optionally) one sub-group. Opened from
+// the toolbar it shows the project; opened from a sub-group's ⋯ menu it adds
+// that sub-group's section, which is the second (and more discoverable) way to
+// edit sub-group metadata.
 const briefOpen = ref(false)
+const briefSubGroupId = ref<string | null>(null)
+function openBrief(subGroupId: string | null = null) {
+  briefSubGroupId.value = subGroupId
+  briefOpen.value = true
+}
 
 const { busy, run } = useBusy()
 
@@ -136,7 +147,10 @@ function openTaskModal() {
     showTaskUpsell.value = true
     return
   }
-  taskSub.value = subGroups.value[0]?.id ?? ''
+  // Default to whatever the board is focused on, else the NEWEST sub-group —
+  // that's the batch being worked on. (subGroupsForProject sorts ascending by
+  // order, so the newest is last.)
+  taskSub.value = subGroupFilter.value || subGroups.value.at(-1)?.id || ''
   taskAssignee.value = data.teamMembers[0]?.uid ?? ''
   taskStatus.value = 'backlog'
   taskTitle.value = ''
@@ -164,19 +178,37 @@ async function createTask() {
   })
 }
 
-async function onBatchCreated() {
+async function onBatchCreated(_ids: string[], targetSubGroupId: string) {
   showBatchWizard.value = false
   // The batch endpoint created deliverables + stage-tasks server-side.
-  // Reload the board so the new sub-groups, tasks, and deliverables appear.
-  await Promise.all([
-    data.loadProjectBoard(projectId.value),
-    data.loadProjectDeliverables(projectId.value),
-  ])
+  // Reload the board so the new sub-group, tasks, and deliverables appear.
+  await data.loadProjectBoard(projectId.value)
+  // A batch aimed at an EXISTING sub-group can sit outside the newest page,
+  // in which case the reload above would file the user's brand new work
+  // off-screen. Pull that one batch in regardless of where paging left it.
+  if (targetSubGroupId && !data.getSubGroup(targetSubGroupId)) {
+    await data.loadSubGroupWithChildren(targetSubGroupId)
+  }
 }
 
 const client = computed(() => (project.value ? data.getClient(project.value.clientId) : undefined))
 const subGroups = computed(() => data.subGroupsForProject(projectId.value))
 const tasks = computed(() => data.tasksForProject(projectId.value))
+
+// Sub-group focus. Once a project runs a batch per month, "everything at once"
+// stops being a useful default view of any of the three layouts — this narrows
+// all of them to one batch. '' = every loaded sub-group.
+const subGroupFilter = ref('')
+const visibleSubGroups = computed(() =>
+  subGroupFilter.value ? subGroups.value.filter((s) => s.id === subGroupFilter.value) : subGroups.value,
+)
+const visibleTasks = computed(() =>
+  subGroupFilter.value ? tasks.value.filter((tk) => tk.subGroupId === subGroupFilter.value) : tasks.value,
+)
+// A filtered-to sub-group can fall out of the loaded window on a reload.
+watch(subGroups, (list) => {
+  if (subGroupFilter.value && !list.some((s) => s.id === subGroupFilter.value)) subGroupFilter.value = ''
+})
 
 // Bulk client visibility (managers): share or hide the whole project's tasks
 // at once — the friendly path now that new tasks default to hidden.
@@ -190,8 +222,31 @@ async function confirmBulk() {
   })
 }
 
-function tasksByStatus(status: string) {
-  return tasks.value.filter((tk) => tk.status === status)
+// Deliverables list order: batch order, or priority-first with batch order as
+// the tiebreak. Persisted per project so a manager who works by priority isn't
+// re-picking it on every visit.
+const deliverableSort = ref<'order' | 'priority'>(
+  (localStorage.getItem(`pasdiu:delSort:${route.params.projectId}`) as 'order' | 'priority') ?? 'order',
+)
+watch(deliverableSort, (v) => localStorage.setItem(`pasdiu:delSort:${projectId.value}`, v))
+function sortedDeliverables(sgId: string) {
+  return data.deliverablesForSubGroup(sgId, deliverableSort.value === 'priority')
+}
+
+// Pull the next page of (older) sub-groups and their tasks/deliverables.
+const loadingMore = ref(false)
+async function loadEarlier() {
+  if (loadingMore.value) return
+  loadingMore.value = true
+  try {
+    await data.loadMoreSubGroups(projectId.value)
+  } finally {
+    loadingMore.value = false
+  }
+}
+
+function tasksInColumn(col: BoardColumn) {
+  return visibleTasks.value.filter((tk) => col.statuses.includes(tk.status))
 }
 function tasksBySubGroup(sgId: string) {
   return tasks.value.filter((tk) => tk.subGroupId === sgId)
@@ -200,10 +255,12 @@ function tasksBySubGroup(sgId: string) {
 const loadError = ref(false)
 const loaded = ref(false)
 const projectPackages = ref<Package[]>([])
-async function load() {
+// `force` comes from the refresh control: re-read even if the store's copy is
+// still inside its freshness window.
+async function load(force = false) {
   loadError.value = false
   try {
-    await Promise.all([data.loadUsers(), data.loadClients()])
+    await Promise.all([data.loadUsers(force), data.loadClients(force)])
     const p = await data.loadProject(projectId.value)
     project.value = p
     if (p) {
@@ -211,10 +268,9 @@ async function load() {
       const { collection: col, getDocs: gd, query: q, where: w } = await import('firebase/firestore')
       const { db: fireDb } = await import('../lib/firebase')
       const { mapPackage } = await import('../lib/mappers')
-      await Promise.all([
-        data.loadProjectBoard(projectId.value),
-        data.loadProjectDeliverables(projectId.value),
-      ])
+      // The board load is paged: it pulls the newest sub-groups plus their
+      // tasks and deliverables. Earlier batches arrive via "load earlier".
+      await data.loadProjectBoard(projectId.value)
       // Load packages for this project.
       const pkgSnap = await gd(q(col(fireDb, 'packages'), w('orgId', '==', data.clients[0]?.orgId || ''), w('projectId', '==', projectId.value)))
       projectPackages.value = pkgSnap.docs.map((d) => mapPackage(d.id, d.data()))
@@ -243,7 +299,7 @@ onMounted(load)
         <h1 class="text-2xl font-bold tracking-tight" style="color: var(--text);">{{ project.name }}</h1>
         <InfoTip :text="t('board.viewInfo')" />
       </div>
-      <StatusCounts :tasks="tasks" />
+      <StatusCounts :tasks="visibleTasks" />
       <!-- Package quota widget -->
       <PackageQuota v-for="pkg in projectPackages" :key="pkg.id" :pkg="pkg" />
       <dl v-if="project.meta.length" class="flex flex-wrap gap-x-8 gap-y-2">
@@ -253,18 +309,42 @@ onMounted(load)
         </div>
       </dl>
       <div class="flex flex-wrap items-center gap-2">
-        <!-- Fluid Kanban ↔ List ↔ Deliverables toggle -->
+        <!-- Fluid Kanban ↔ List ↔ Deliverables toggle. Labelled, not icon-only:
+             three glyphs gave no clue that the third one is a different unit of
+             work rather than a third layout. -->
         <SegmentedControl
           v-model="view"
+          show-labels
           :options="[
             { value: 'kanban', label: t('board.viewKanban'), icon: 'kanban' },
             { value: 'list', label: t('board.viewList'), icon: 'list' },
-            { value: 'deliverables', label: t('board.viewDeliverables'), icon: 'grid' },
+            { value: 'deliverables', label: t('board.viewDeliverables'), icon: 'grid', badge: data.deliverables.filter((d) => d.projectId === projectId).length },
           ]"
         />
 
-        <!-- Primary action: new task (always visible) -->
-        <BaseButton v-if="auth.isManager" class="ml-auto whitespace-nowrap" :disabled="!subGroups.length" @click="openTaskModal">
+        <!-- Focus one batch across whichever layout is active. -->
+        <select
+          v-if="subGroups.length > 1"
+          v-model="subGroupFilter"
+          class="rounded-lg border px-2 py-1.5 text-sm outline-none"
+          style="background: var(--surface-2); color: var(--text); border-color: var(--border);"
+          :aria-label="t('board.filterSubGroup')"
+        >
+          <option value="">{{ t('board.allSubGroups') }}</option>
+          <option v-for="sg in subGroups" :key="sg.id" :value="sg.id">{{ sg.name }}</option>
+        </select>
+
+        <!-- Primary action: new task. Disabled until a sub-group exists (a task
+             has nowhere to live otherwise) — with the reason spelled out, since
+             a dead button with no explanation is the thing people get stuck on. -->
+        <BaseButton
+          v-if="auth.isManager"
+          class="ml-auto whitespace-nowrap"
+          :disabled="!subGroups.length"
+          :title="!subGroups.length ? t('board.needSubGroupFirst') : undefined"
+          :aria-describedby="!subGroups.length ? 'need-subgroup-hint' : undefined"
+          @click="openTaskModal"
+        >
           + {{ t('actions.newTask') }}
         </BaseButton>
 
@@ -274,9 +354,19 @@ onMounted(load)
             role="menuitem"
             class="block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-2)]"
             style="color: var(--text);"
-            @click="briefOpen = true"
+            @click="openBrief()"
           >
             {{ t('brief.open') }}
+          </button>
+          <!-- Store data ages out on a timer; this is the "I know something
+               changed, show me now" escape hatch. -->
+          <button
+            role="menuitem"
+            class="block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-2)]"
+            style="color: var(--text);"
+            @click="load(true)"
+          >
+            {{ t('common.refresh') }}
           </button>
           <template v-if="auth.isManager">
             <button
@@ -325,48 +415,42 @@ onMounted(load)
           </template>
         </OverflowMenu>
       </div>
+
+      <!-- Empty project: the blocked action explains itself and offers the fix. -->
+      <p v-if="auth.isManager && !subGroups.length" id="need-subgroup-hint" class="text-sm" style="color: var(--text-muted);">
+        {{ t('board.needSubGroupFirst') }}
+        <button class="underline underline-offset-2" style="color: var(--accent-cyan);" @click="showSub = true">
+          {{ t('actions.newSubGroup') }}
+        </button>
+      </p>
     </div>
 
-    <!-- KANBAN: columns by status -->
+    <!-- KANBAN: columns by status (review folds the client-flow statuses) -->
     <div v-if="view === 'kanban'" class="mt-6 flex gap-4 overflow-x-auto pb-2">
-      <div v-for="s in TASK_STATUSES" :key="s" class="w-72 shrink-0">
+      <div v-for="col in BOARD_COLUMNS" :key="col.key" class="w-72 shrink-0">
         <div class="mb-2 flex items-center gap-2">
-          <span class="h-2 w-2 rounded-full" :style="{ background: statusColor(s) }" />
-          <h2 class="text-sm font-semibold" style="color: var(--text);">{{ t(statusKey(s)) }}</h2>
-          <span class="text-xs" style="color: var(--text-muted);">{{ tasksByStatus(s).length }}</span>
+          <span class="h-2 w-2 rounded-full" :style="{ background: col.color }" />
+          <h2 class="text-sm font-semibold" style="color: var(--text);">{{ t(col.labelKey) }}</h2>
+          <span class="text-xs" style="color: var(--text-muted);">{{ tasksInColumn(col).length }}</span>
         </div>
         <TransitionGroup name="list" tag="div" class="space-y-2">
-          <TaskCard v-for="tk in tasksByStatus(s)" :key="tk.id" :task="tk" show-sub-group />
+          <TaskCard v-for="tk in tasksInColumn(col)" :key="tk.id" :task="tk" show-sub-group />
         </TransitionGroup>
       </div>
     </div>
 
     <!-- LIST: grouped by sub-group, sequential -->
     <div v-else-if="view === 'list'" class="mt-6 space-y-6">
-      <div v-for="sg in subGroups" :key="sg.id">
+      <div v-for="sg in visibleSubGroups" :key="sg.id">
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div class="flex items-center gap-2">
-            <h2 class="text-sm font-semibold uppercase tracking-wide" style="color: var(--text-muted);">{{ sg.name }}</h2>
-            <button
+            <h2 class="text-sm font-semibold uppercase tracking-wide" style="color: var(--text);">{{ sg.name }}</h2>
+            <SubGroupMenu
               v-if="auth.isManager"
-              class="text-xs"
-              style="color: var(--text-muted);"
-              :aria-label="t('board.editSubGroup')"
-              :title="t('board.editSubGroup')"
-              @click="openEditSub(sg.id)"
-            >
-              ✎
-            </button>
-            <button
-              v-if="auth.isManager"
-              class="text-xs"
-              style="color: var(--accent-amber);"
-              :aria-label="t('actions.delete')"
-              :title="t('actions.delete')"
-              @click="subToDelete = sg.id"
-            >
-              ✕
-            </button>
+              @edit="openEditSub(sg.id)"
+              @brief="openBrief(sg.id)"
+              @delete="subToDelete = sg.id"
+            />
           </div>
           <StatusCounts :tasks="tasksBySubGroup(sg.id)" />
         </div>
@@ -386,14 +470,31 @@ onMounted(load)
 
     <!-- DELIVERABLES: grouped by sub-group -->
     <div v-else class="mt-6 space-y-6">
-      <div v-for="sg in subGroups" :key="sg.id">
-        <div class="mb-2 flex items-center gap-2">
-          <h2 class="text-sm font-semibold uppercase tracking-wide" style="color: var(--text-muted);">{{ sg.name }}</h2>
-          <span class="text-xs" style="color: var(--text-muted);">{{ data.deliverablesForSubGroup(sg.id).length }}</span>
+      <div v-if="subGroups.length" class="flex justify-end">
+        <SegmentedControl
+          v-model="deliverableSort"
+          :options="[
+            { value: 'order', label: t('deliverableDetail.sortByOrder') },
+            { value: 'priority', label: t('deliverableDetail.sortByPriority') },
+          ]"
+        />
+      </div>
+      <div v-for="sg in visibleSubGroups" :key="sg.id">
+        <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <h2 class="text-sm font-semibold uppercase tracking-wide" style="color: var(--text);">{{ sg.name }}</h2>
+            <span class="text-xs" style="color: var(--text-muted);">{{ data.deliverablesForSubGroup(sg.id).length }}</span>
+            <SubGroupMenu
+              v-if="auth.isManager"
+              @edit="openEditSub(sg.id)"
+              @brief="openBrief(sg.id)"
+              @delete="subToDelete = sg.id"
+            />
+          </div>
         </div>
-        <div v-if="data.deliverablesForSubGroup(sg.id).length" class="space-y-2">
+        <div v-if="sortedDeliverables(sg.id).length" class="space-y-2">
           <RouterLink
-            v-for="del in data.deliverablesForSubGroup(sg.id)"
+            v-for="del in sortedDeliverables(sg.id)"
             :key="del.id"
             :to="{ name: 'deliverable', params: { deliverableId: del.id } }"
             class="flex items-center justify-between rounded-xl border p-3 transition-transform hover:-translate-y-0.5"
@@ -401,6 +502,7 @@ onMounted(load)
           >
             <div class="flex items-center gap-3">
               <span class="text-sm font-medium" style="color: var(--text);">{{ del.name }}</span>
+              <PriorityBadge :priority="del.priority" />
               <span class="rounded px-1.5 py-0.5 text-xs" style="background: var(--surface-2); color: var(--text-muted);">
                 {{ del.status }}
               </span>
@@ -422,7 +524,27 @@ onMounted(load)
       <p v-if="!subGroups.length" class="text-sm" style="color: var(--text-muted);">{{ t('board.noDeliverables') }}</p>
     </div>
 
-    <BriefDrawer :open="briefOpen" :project-id="project.id" :brief="project.brief" @close="briefOpen = false" />
+    <!-- Paging: the board holds only the newest sub-groups. Say so, rather than
+         letting the earlier ones look deleted. -->
+    <div v-if="data.projectHasMoreSubGroups(projectId)" class="mt-6 flex items-center justify-center gap-3">
+      <button
+        class="rounded-lg border px-3 py-2 text-sm disabled:opacity-50"
+        style="background: var(--surface-2); color: var(--text); border-color: var(--border);"
+        :disabled="loadingMore"
+        @click="loadEarlier"
+      >
+        {{ loadingMore ? t('common.loading') : t('board.loadEarlier') }}
+      </button>
+      <span class="text-xs" style="color: var(--text-muted);">{{ t('board.pagedHint') }}</span>
+    </div>
+
+    <BriefDrawer
+      :open="briefOpen"
+      :client-id="project.clientId"
+      :project-id="project.id"
+      :sub-group-id="briefSubGroupId"
+      @close="briefOpen = false"
+    />
 
     <!-- Edit project -->
     <Modal :open="showEditProject" :title="t('actions.editProject')" @close="showEditProject = false">
@@ -549,7 +671,7 @@ onMounted(load)
           <label class="block">
             <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('board.changeStatus') }}</span>
             <BaseSelect v-model="taskStatus">
-              <option v-for="s in TASK_STATUSES" :key="s" :value="s">{{ t(statusKey(s)) }}</option>
+              <option v-for="s in MANUAL_TASK_STATUSES" :key="s" :value="s">{{ t(statusKey(s)) }}</option>
             </BaseSelect>
           </label>
           <label class="block">
@@ -589,7 +711,7 @@ onMounted(load)
 
   <section v-else-if="loadError">
     <p class="text-sm" style="color: var(--text-muted);">{{ t('common.loadError') }}</p>
-    <BaseButton class="mt-3" @click="load">{{ t('common.retry') }}</BaseButton>
+    <BaseButton class="mt-3" @click="load(true)">{{ t('common.retry') }}</BaseButton>
   </section>
 
   <section v-else-if="loaded">

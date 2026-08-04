@@ -24,7 +24,7 @@ import {
 } from 'firebase/firestore'
 import { FirebaseError } from 'firebase/app'
 import { auth, db } from '../lib/firebase'
-import { acceptInviteApi, createOrgApi, fetchMyInvitesApi, renameOrgApi } from '../lib/api'
+import { acceptInviteApi, createOrgApi, declineInviteApi, fetchMyInvitesApi, renameOrgApi } from '../lib/api'
 import type { PendingInvite } from '../lib/api'
 import { identify, resetAnalytics, track } from '../lib/analytics'
 import { mapMember, mapMembership, mapOrg, mapUsage } from '../lib/mappers'
@@ -264,35 +264,42 @@ export const useAuthStore = defineStore('auth', () => {
     await router.replace(homeRoute())
   }
 
-  // ── Pending-invite auto-accept ───────────────────────────────────
-  // After session bootstrap, check if the user has pending invitations and
-  // accept them automatically. The manager already authorized the invite —
-  // making the user click "accept" again adds friction for no security gain.
-  // Non-blocking: a failure is silent — the invite link still works as fallback.
-  async function checkAndAcceptInvites(): Promise<void> {
+  // ── Pending invitations ──────────────────────────────────────────
+  // Read-only: joining a workspace is always the invitee's own act.
+  //
+  // This used to auto-accept every pending invite at bootstrap, on the grounds
+  // that the manager had already authorized it so a second click bought
+  // nothing. That reasoning conflates two different consents: the manager
+  // authorizing means the WORKSPACE agrees to the user joining, which says
+  // nothing about whether the USER agrees to join it. Obtaining that second
+  // consent is the entire purpose of an invitation. In practice it meant
+  // anyone who knew your address could put you in their workspace — with your
+  // name and email on their team page — across several orgs in a single
+  // sign-in, with no way to refuse.
+  //
+  // Failures are swallowed: an empty list is a legitimate state, and a user
+  // with no invitations must still reach the create-a-workspace screen.
+  async function loadPendingInvites(): Promise<void> {
     try {
       const res = await fetchMyInvitesApi()
-      if (!res.ok || res.data.invites.length === 0) return
-      pendingInvites.value = res.data.invites
-
-      // Accept all pending invites in parallel.
-      const results = await Promise.allSettled(
-        res.data.invites.map((inv) => acceptInviteApi(inv.orgId, inv.inviteId)),
-      )
-
-      // If at least one succeeded, refresh memberships so the user lands in
-      // the workspace instead of the onboarding screen.
-      const anyAccepted = results.some(
-        (r) => r.status === 'fulfilled' && r.value.ok,
-      )
-      if (anyAccepted) {
-        await refreshMemberships()
-        pendingInvites.value = []
-        track('invite_auto_accepted', { count: results.filter((r) => r.status === 'fulfilled' && r.value.ok).length })
-      }
+      pendingInvites.value = res.ok ? res.data.invites : []
     } catch {
-      // Silent — not critical path. The user can still use the invite link.
+      pendingInvites.value = []
     }
+  }
+
+  // Refuse an invitation. Recorded server-side as 'declined' so the manager
+  // can tell a refusal from an invite nobody has opened yet.
+  async function declineInvite(orgId: string, inviteId: string): Promise<boolean> {
+    error.value = null
+    const res = await declineInviteApi(orgId, inviteId)
+    if (!res.ok) {
+      error.value = t(res.error.key, res.error.params ?? {})
+      return false
+    }
+    track('invite_declined', { orgId })
+    pendingInvites.value = pendingInvites.value.filter((i) => i.inviteId !== inviteId)
+    return true
   }
 
   // ── Session bootstrap ───────────────────────────────────────────
@@ -313,15 +320,17 @@ export const useAuthStore = defineStore('auth', () => {
         { merge: true },
       )
       await refreshMemberships()
-      // If the user has no memberships yet, they might have pending invites
-      // (e.g. email never arrived). Await auto-accept so the router guard
-      // sees the membership BEFORE redirecting to /welcome.
-      // For users already in an org, fire-and-forget (new invites from other
-      // orgs get picked up without blocking the landing).
+      // Load (never accept) any invitations addressed to this account, and
+      // only when the user has nowhere to land: /welcome renders them as the
+      // primary way in, so it must not flash the create-a-workspace form
+      // first.
+      //
+      // A user who already has a workspace is NOT fetched for here: their
+      // invitations render in the app shell (components/PendingInvites.vue),
+      // which loads them on mount. Fetching in both places would be the same
+      // request twice on every sign-in.
       if (memberships.value.length === 0) {
-        await checkAndAcceptInvites()
-      } else {
-        void checkAndAcceptInvites()
+        await loadPendingInvites()
       }
       // Analytics identity = uid only (never email/name — see lib/analytics).
       // Here rather than in the login functions so restored sessions count too.
@@ -556,6 +565,8 @@ export const useAuthStore = defineStore('auth', () => {
     usage,
     needsWorkspace,
     pendingInvites,
+    loadPendingInvites,
+    declineInvite,
     refreshMemberships,
     setActiveOrg,
     login,

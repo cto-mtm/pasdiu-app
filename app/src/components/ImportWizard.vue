@@ -152,6 +152,10 @@ const validRows = computed(() => prepared.value.filter((p) => !p.error))
 const invalidRows = computed(() => prepared.value.filter((p) => p.error))
 const missingRequired = computed(() => FIELDS[entity.value].filter((f) => f.required && !mapping.value[f.key]))
 
+// Reuse a sub-group with this name if the project already has one, so an
+// import that names an existing batch adds to it instead of forking a
+// duplicate. Correctness depends on the store holding EVERY sub-group of the
+// project — see the loadAllSubGroupsForProject call in runImport.
 async function ensureSubGroup(projectId: string, name: string): Promise<string> {
   const existing = data.subGroups.find((s) => s.projectId === projectId && s.name.toLowerCase() === name.toLowerCase())
   if (existing) return existing.id
@@ -164,8 +168,11 @@ async function runImport() {
     const failed: { row: number; reason: string }[] = []
     let ok = 0
     if (entity.value === 'tasks') {
+      // Every sub-group, not loadProjectBoard's newest-few page: ensureSubGroup
+      // dedupes by name against the store, so a paged view would silently
+      // create a second sub-group alongside each older one the CSV names.
       const pids = [...new Set(validRows.value.map((p) => p.payload!.projectId as string))]
-      await Promise.all(pids.map((pid) => data.loadProjectBoard(pid)))
+      await Promise.all(pids.map((pid) => data.loadAllSubGroupsForProject(pid)))
     }
     for (const p of validRows.value) {
       const pl = p.payload!

@@ -5,7 +5,9 @@ import { useI18n } from 'vue-i18n'
 import { useDataStore } from '../stores/data'
 import { useAuthStore } from '../stores/auth'
 import { useBusy } from '../composables/useBusy'
+import { useTaskStatusChange } from '../composables/useTaskStatusChange'
 import { sanitizeExternalUrl } from '../lib/url'
+import { statusKey } from '../lib/status'
 import { fromDateInputValue, toDateInputValue } from '../lib/dates'
 import type { Deliverable, Version, Note, MetaField } from '../lib/types'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
@@ -60,6 +62,23 @@ async function approve() {
   if (!task.value) return
   await run(() => data.updateTaskStatus(task.value!.id, 'approved'))
 }
+
+// Status control for whoever owns the work. Same permissions and same
+// confirm-with-reason step as the board's TaskCard — crew no longer have to
+// go back to the board to move a task they're looking at.
+const {
+  canChangeStatus: canChangeTaskStatus,
+  statusOptions,
+  confirmOpen: statusConfirmOpen,
+  pendingStatus,
+  pendingDetail,
+  needsBlockedReason,
+  asksDeliveryNote,
+  confirmDisabled: statusConfirmDisabled,
+  onSelect: onStatusSelect,
+  confirmChange: confirmStatusChange,
+  cancelChange: cancelStatusChange,
+} = useTaskStatusChange(() => task.value)
 
 // Add a new media version (v1, v2, …) with an optional note/description.
 const canContribute = computed(() => auth.isManager || auth.role === 'contractor')
@@ -179,19 +198,16 @@ async function load() {
 
       // Load parent deliverable for stage context.
       if (tk.deliverableId) {
-        const { getDoc, doc: docRef } = await import('firebase/firestore')
-        const { db: fireDb } = await import('../lib/firebase')
-        const { mapDeliverable } = await import('../lib/mappers')
-        const delSnap = await getDoc(docRef(fireDb, 'deliverables', tk.deliverableId))
-        if (delSnap.exists()) {
-          parentDeliverable.value = mapDeliverable(delSnap.id, delSnap.data())
+        const del = await data.loadDeliverable(tk.deliverableId)
+        if (del) {
+          parentDeliverable.value = del
 
           // Find previous stage's handoff note (deliveryNote on the prior task).
-          const del = parentDeliverable.value
           const stageIndex = del.stages.findIndex((s) => s.id === tk.stageId)
           if (stageIndex > 0) {
             const prevStageId = del.stages[stageIndex - 1].id
             const { getDocs: gd, query: q, collection: col, where: w } = await import('firebase/firestore')
+            const { db: fireDb } = await import('../lib/firebase')
             const prevSnap = await gd(q(
               col(fireDb, 'tasks'),
               w('deliverableId', '==', tk.deliverableId),
@@ -228,8 +244,19 @@ onMounted(load)
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h1 class="text-2xl font-bold tracking-tight" style="color: var(--text);">{{ task.title }}</h1>
-        <div class="mt-2 flex items-center gap-3">
+        <div class="mt-2 flex flex-wrap items-center gap-3">
           <StatusBadge :status="task.status" />
+          <!-- Managers and the assigned contractor move the task from here. -->
+          <select
+            v-if="canChangeTaskStatus"
+            class="rounded border px-2 py-1 text-xs outline-none"
+            style="background: var(--surface-2); color: var(--text); border-color: var(--border);"
+            :value="task.status"
+            :aria-label="t('board.changeStatus')"
+            @change="onStatusSelect"
+          >
+            <option v-for="s in statusOptions" :key="s" :value="s">{{ t(statusKey(s)) }}</option>
+          </select>
           <span class="text-sm" style="color: var(--text-muted);">{{ data.userName(task.assigneeUid) }}</span>
         </div>
         <!-- Blocked reasons are internal — never rendered for the client role. -->
@@ -256,7 +283,6 @@ onMounted(load)
       <div class="flex items-center gap-2">
         <!-- Brief is viewable by everyone with task access (managers, editors, clients). -->
         <button
-          v-if="project"
           class="rounded-lg border px-3 py-1.5 text-sm"
           style="background: var(--surface-2); color: var(--text); border-color: var(--border);"
           @click="briefOpen = true"
@@ -404,11 +430,14 @@ onMounted(load)
       </div>
     </div>
 
+    <!-- A task knows its whole chain, so the brief here is the full picture:
+         client → project → sub-group → deliverable. -->
     <BriefDrawer
       :open="briefOpen"
-      :project-id="project?.id ?? null"
-      :brief="project?.brief ?? null"
-      :deliverable-meta="parentDeliverable ? { name: parentDeliverable.name, meta: parentDeliverable.meta } : null"
+      :client-id="task.clientId"
+      :project-id="task.projectId"
+      :sub-group-id="task.subGroupId || null"
+      :deliverable-id="task.deliverableId || null"
       @close="briefOpen = false"
     />
 
@@ -481,6 +510,30 @@ onMounted(load)
         </div>
       </form>
     </Modal>
+
+    <!-- Status change confirmation. Blocked demands a documented reason;
+         delivered offers a delivery note. -->
+    <ConfirmDialog
+      :open="statusConfirmOpen"
+      :title="t('board.confirmTitle')"
+      :message="t('board.confirmBody', { title: task.title, status: pendingStatus ? t(statusKey(pendingStatus)) : '' })"
+      :confirm-disabled="statusConfirmDisabled"
+      @confirm="confirmStatusChange"
+      @cancel="cancelStatusChange"
+    >
+      <label v-if="needsBlockedReason || asksDeliveryNote" class="mt-3 block">
+        <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">
+          {{ needsBlockedReason ? t('board.blockedReasonLabel') : t('board.deliveryNoteLabel') }}
+        </span>
+        <textarea
+          v-model="pendingDetail"
+          rows="2"
+          :placeholder="needsBlockedReason ? t('board.blockedReasonPlaceholder') : t('board.deliveryNotePlaceholder')"
+          class="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+          style="background: var(--surface-2); color: var(--text); border-color: var(--border);"
+        />
+      </label>
+    </ConfirmDialog>
 
     <ConfirmDialog
       :open="showDeleteTask"

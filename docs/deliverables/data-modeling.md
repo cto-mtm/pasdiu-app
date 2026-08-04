@@ -179,18 +179,50 @@ Boards read deliverables, not tasks, one sub-group (batch) at a time, ~50 per
 page. 18,000 reads → ~50. Task documents are read only when a deliverable is
 opened.
 
+**Shipped, with one deviation.** `loadProjectBoard` now pages sub-groups —
+newest 2 by `order` descending, with "load earlier" for the rest — and reads
+tasks and deliverables scoped to that window via `subGroupId in [...]`
+(chunked at Firestore's 30-value `in` cap). The deviation: it still reads
+**task** documents, not deliverables alone, because the kanban and list layouts
+are task-based and remain the default. The unbounded-per-project read is gone
+either way — reads now scale with the size of a batch, not with a project's
+history. Dropping tasks from the board entirely would mean making the
+deliverables layout the only one, which is a product decision, not a data one.
+
+**Paging key is `order`, not a timestamp.** `SubGroup` has no `createdAt`, but
+`order` is assigned as the project's sub-group count at creation, so descending
+`order` is newest-first — no schema change and no backfill. Ties (two
+sub-groups created concurrently landing on the same `order`) are safe:
+`startAfter(snapshot)` disambiguates on `__name__`.
+
 ### 4. Denormalize `latestVersion` onto the deliverable
 
 Otherwise the portal pays a subcollection read per row to show the current cut.
 
 ### 5. Fix the existing load patterns
 
-- Memoize `loadAllProjects` / `loadAllTasks`, or replace the `loadWorkspace`
-  call on pages that need a filtered subset.
+- ~~Memoize `loadAllProjects` / `loadAllTasks`~~ **Done**, but as a **TTL, not
+  a permanent flag.** Every full-collection load records when it ran and
+  re-reads past 5 minutes; each takes a `force` argument that the refresh
+  controls pass. The earlier `usersLoaded`/`clientsLoaded` booleans were
+  permanent for the life of the session, which traded stale data for saved
+  reads without telling anyone — that was the actual source of "why is this
+  not updating?".
 - `ClientDetailPage` and `TeamPage` should query their subset, not the whole
-  org's tasks.
+  org's tasks. **Still open.**
 - Analytics and Ledger must stop computing over a 1,000-document page — move to
-  aggregation queries or precomputed rollups.
+  aggregation queries or precomputed rollups. **Still open**, and see the
+  correctness bug above: this is the one that makes those pages silently wrong
+  rather than merely slow.
+
+**A memo must be invalidated by anything that REMOVES documents it vouches
+for.** Board paging prunes a project's out-of-window tasks from the store, so
+`loadProjectBoard` explicitly drops the `tasks` memo. Without that, the Ledger,
+All Tasks and Analytics would hit a memo that still claimed freshness and
+render the pruned set with no indication anything was missing. For the same
+reason, components must not keep **private** load flags: `OmniSearch` and
+`SlatePage` both had one, both outlived the pages that pruned the store, and
+both are now gone in favour of the store's memo.
 
 ### 6. Index exemptions
 
@@ -241,3 +273,17 @@ The emulator does **not** enforce composite indexes; a missing one throws
 - tasks by `orgId` + `deliverableId`
 - tasks by `orgId` + `assigneeUid` (+ `dueAt` range)
 - recording sessions by `orgId` + `projectId` + `date` range
+
+Added by board paging (all three are in `firestore.indexes.json`):
+
+- sub-groups by `orgId` + `projectId` + `order` **descending** — the paging
+  query itself. The pre-existing `projectId` + `order` ascending index does
+  not serve it: different field set, opposite direction.
+- tasks by `orgId` + `subGroupId` — the `in` chunk. `in` is a disjunction of
+  equality filters, so this is an ordinary two-equality composite.
+- deliverables by `orgId` + `subGroupId` — same query for the deliverables side.
+
+**Priority needs no index.** Deliverable priority is sorted in memory on the
+board and in the portal, both of which already hold the full set they render.
+Making it a Firestore `orderBy` would add an index to every deliverable query
+for no benefit.

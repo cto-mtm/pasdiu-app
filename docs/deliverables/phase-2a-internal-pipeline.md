@@ -175,19 +175,38 @@ mean the recorder ever writes them. Without a prompt, the field stays empty and
 the editor is exactly as blind as before — the original complaint, relocated.
 
 The mechanism already exists and works. `Task.deliveryNote` is prompted at
-status change today: `TaskCard.vue` and `IterationRoomPage.vue` ask "how/where
-was it delivered?" when a task moves to `delivered`, with copy already keyed in
-both locales in `app/src/i18n/locales/pages/board.ts`, and the rules already
-permit the assigned contractor to write that field alongside `status`.
+status change, with copy already keyed in both locales in
+`app/src/i18n/locales/pages/board.ts`, and the rules already permit the
+assigned contractor to write that field alongside `status`.
 
-Generalize it: **completing any stage task prompts for a handoff note** aimed
-at the next stage's owner ("which takes are good, what should the editor
-know"). Reuse the existing prompt component and the existing permitted key
-set — no rules change needed, because `deliveryNote` is already in the
-contractor's allowed keys.
+**The prompt now lives in one place**: `app/src/composables/useTaskStatusChange.ts`,
+shared by `TaskCard.vue` and `IterationRoomPage.vue` (the task page had no
+status control at all before — crew had to go back to the board to move a task
+they were looking at). Anything added to the composable reaches both surfaces.
+
+**The generalization is done.** `asksDeliveryNote` fires when a task moves to
+`delivered` **or** when a deliverable-linked task reaches any terminal status —
+so completing a stage task prompts for a handoff note. No rules change was
+needed: `deliveryNote` is already in the contractor's allowed keys.
+
+The prompt existed before the persistence did: `updateTaskStatus` used to write
+`deliveryNote` only when the status was exactly `delivered`, so a note typed
+while completing a stage was collected and then dropped. It now writes on any
+terminal status, and refuses to write an empty value so a blank prompt can't
+erase a note the task already has.
+
+Note that `delivered` is no longer a status anyone picks by hand (see the
+README's status section), so in practice the prompt is reached by completing a
+stage — which is exactly the path this section wanted.
+
+What remains of this item: aiming the copy at the *next stage's owner* ("which
+takes are good, what should the editor know") rather than at delivery, and
+surfacing the result.
 
 The note must surface on the deliverable thread and on the next stage's task,
-not just on the task that produced it.
+not just on the task that produced it. (`IterationRoomPage` already reads the
+previous stage's `deliveryNote` and renders it as the handoff note — the
+deliverable thread is the missing half.)
 
 Make it required-ish, not required: a skip is allowed but the prompt is the
 default path. Blocking completion on a text field will just get empty strings

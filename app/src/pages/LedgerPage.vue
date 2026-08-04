@@ -71,10 +71,10 @@ function exportCsv() {
 }
 
 const loadError = ref(false)
-async function load() {
+async function load(force = false) {
   loadError.value = false
   try {
-    await data.loadWorkspace()
+    await data.loadWorkspace(force)
   } catch {
     loadError.value = true
   }
@@ -103,7 +103,7 @@ onMounted(load)
 
     <div v-if="loadError" class="mt-8">
       <p class="text-sm" style="color: var(--text-muted);">{{ t('common.loadError') }}</p>
-      <BaseButton class="mt-3" @click="load">{{ t('common.retry') }}</BaseButton>
+      <BaseButton class="mt-3" @click="load(true)">{{ t('common.retry') }}</BaseButton>
     </div>
 
     <template v-else>

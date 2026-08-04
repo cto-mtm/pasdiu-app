@@ -118,7 +118,7 @@ before(async () => {
       orgId: 'o_a', clientId: 'c1', projectId: 'p1', subGroupId: 'sg1',
       subGroupName: 'Batch 1', typeId: 'dt1', name: 'Video 1',
       stages: [{ id: 's1', name: 'Edit', optional: false, clientFacing: false }],
-      stageSummary: [], status: 'active', clientVisible: true,
+      stageSummary: [], status: 'active', priority: 'normal', clientVisible: true,
       latestVersionUrl: '', order: 0, meta: [], createdAt: new Date(), deliveredAt: null,
     })
     // d2: org A, tenant c2, visible — tests tenant scoping for clients.
@@ -661,6 +661,25 @@ test('manager can read all org deliverables; cross-org denied', async () => {
 test('manager can update safe fields on deliverable', async () => {
   const mgr = env.authenticatedContext('mgr').firestore()
   await assertSucceeds(updateDoc(doc(mgr, 'deliverables/d1'), { name: 'Renamed', clientVisible: false }))
+})
+
+test('manager can set deliverable priority', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertSucceeds(updateDoc(doc(mgr, 'deliverables/d1'), { priority: 'high' }))
+})
+
+test('priority is not writable by contractors or clients', async () => {
+  const ed = env.authenticatedContext('ed').firestore()
+  const cl = env.authenticatedContext('cl').firestore()
+  await assertFails(updateDoc(doc(ed, 'deliverables/d1'), { priority: 'high' }))
+  // d1 is this client's and clientVisible, so the read passes — the write
+  // must still fail: priority is an agency decision, not a client one.
+  await assertFails(updateDoc(doc(cl, 'deliverables/d1'), { priority: 'high' }))
+})
+
+test('priority cannot smuggle a forged field alongside it', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertFails(updateDoc(doc(mgr, 'deliverables/d1'), { priority: 'high', approvedBy: 'hacker' }))
 })
 
 test('manager cannot update approval or stageSummary fields on deliverable', async () => {

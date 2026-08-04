@@ -82,12 +82,15 @@ orgsRouter.get(
       .where("status", "==", "pending")
       .get();
 
-    const invites: Array<{
-      orgId: string;
-      inviteId: string;
-      orgName: string;
-      role: string;
-    }> = [];
+    // Two passes. The first reads nothing: it filters the expired rows out and
+    // collects which org / inviter docs are still needed. The second fetches
+    // those in one batched read each. Resolving inline instead would be a
+    // sequential round-trip per invite, and this list is rendered on the
+    // sign-in path.
+    type Row = { orgId: string; inviteId: string; orgName: string; role: string; invitedBy: string };
+    const rows: Row[] = [];
+    const orgIdsToResolve = new Set<string>();
+    const inviterRefs = new Map<string, string>(); // "orgId/uid" -> uid
 
     for (const doc of snaps.docs) {
       // Path: orgs/{orgId}/invites/{inviteId}
@@ -96,20 +99,53 @@ orgsRouter.get(
       const data = doc.data();
       if (inviteExpired(data)) continue;
 
-      // Resolve org name (prefer denormalized, else read org doc).
-      let orgName = typeof data.orgName === "string" ? data.orgName : "";
-      if (!orgName) {
-        const orgSnap = await db.doc(`orgs/${orgId}`).get();
-        orgName = (orgSnap.get("name") as string) || orgId;
-      }
+      // Prefer the denormalized org name; the rest need the org doc.
+      const orgName = typeof data.orgName === "string" ? data.orgName : "";
+      if (!orgName) orgIdsToResolve.add(orgId);
 
-      invites.push({
+      const invitedBy = typeof data.invitedBy === "string" ? data.invitedBy : "";
+      if (invitedBy) inviterRefs.set(`${orgId}/${invitedBy}`, invitedBy);
+
+      rows.push({
         orgId,
         inviteId: doc.id,
         orgName,
         role: typeof data.role === "string" ? data.role : "",
+        invitedBy,
       });
     }
+
+    const orgNames = new Map<string, string>();
+    if (orgIdsToResolve.size > 0) {
+      const orgSnaps = await db.getAll(...[...orgIdsToResolve].map((id) => db.doc(`orgs/${id}`)));
+      for (const snap of orgSnaps) orgNames.set(snap.id, (snap.get("name") as string) || snap.id);
+    }
+
+    // Who sent it. An invitation reads as a message from a person, not from a
+    // system — "Paula at Pasdiu Studio invited you" is what makes it
+    // trustworthy enough to accept. The name comes from the inviter's MEMBER
+    // doc, so it is the name they go by in that workspace. Empty string when
+    // that doc is gone (they left the org): callers fall back to naming the
+    // workspace alone rather than rendering a blank name.
+    const inviterNames = new Map<string, string>();
+    if (inviterRefs.size > 0) {
+      const keys = [...inviterRefs.keys()];
+      const memberSnaps = await db.getAll(...keys.map((k) => db.doc(`orgs/${k.split("/")[0]}/members/${k.split("/")[1]}`)));
+      keys.forEach((key, i) => {
+        const name = memberSnaps[i]?.get("displayName");
+        if (typeof name === "string" && name) inviterNames.set(key, name);
+      });
+    }
+
+    const invites = rows.map((row) => ({
+      orgId: row.orgId,
+      inviteId: row.inviteId,
+      orgName: row.orgName || orgNames.get(row.orgId) || row.orgId,
+      role: row.role,
+      invitedByName: row.invitedBy
+        ? inviterNames.get(`${row.orgId}/${row.invitedBy}`) ?? ""
+        : "",
+    }));
 
     res.json({ invites });
   })
@@ -348,6 +384,43 @@ orgsRouter.post(
     });
 
     res.json({ orgId });
+  })
+);
+
+// POST /orgs/:orgId/invites/:inviteId/decline
+// The invitee refusing. Authorization is the same test accept uses — the
+// invite must be addressed to THIS caller's email — so one person can never
+// decline another's invitation.
+//
+// Declining is recorded rather than deleting the invite: a manager needs to
+// tell "they said no" apart from "they haven't looked yet", and silently
+// removing the row makes a refusal indistinguishable from one that was never
+// sent. Terminal either way — the invite cannot be accepted afterwards, and a
+// manager who wants to try again issues a new one.
+orgsRouter.post(
+  "/:orgId/invites/:inviteId/decline",
+  asyncHandler(async (req, res) => {
+    const user = userOf(req);
+    const { orgId, inviteId } = req.params;
+    const db = getFirestore();
+    const inviteRef = db.doc(`orgs/${orgId}/invites/${inviteId}`);
+
+    await db.runTransaction(async (tx) => {
+      const inviteSnap = await tx.get(inviteRef);
+      const invite = inviteSnap.data();
+      // Expiry is deliberately NOT a reason to refuse the write: declining an
+      // invitation that has already lapsed is harmless and still records the
+      // answer. Everything else mirrors accept's 404.
+      if (!invite || invite.status !== "pending" || invite.email !== emailOf(user)) {
+        throw new ApiError(404, "Invite not found");
+      }
+      tx.update(inviteRef, {
+        status: "declined",
+        declinedAt: FieldValue.serverTimestamp(),
+      });
+    });
+
+    res.json({ declined: true });
   })
 );
 

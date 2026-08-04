@@ -6,6 +6,9 @@ const en = {
   approved: 'Approved',
   delivered: 'Delivered',
   done: 'Done',
+  // Not a status — the board column that folds the three the client flow
+  // writes (revisions / approved / delivered) into one place.
+  review: 'In Review',
 }
 
 const es: typeof en = {
@@ -16,6 +19,7 @@ const es: typeof en = {
   approved: 'Aprobado',
   delivered: 'Entregado',
   done: 'Terminado',
+  review: 'En revisión',
 }
 
 export default { en, es }

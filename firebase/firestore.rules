@@ -373,7 +373,7 @@ service cloud.firestore {
       allow update: if isManagerOf(resource.data.orgId)
         && orgIdUnchanged()
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['name', 'meta', 'order', 'clientVisible', 'status']);
+          .hasOnly(['name', 'meta', 'order', 'clientVisible', 'status', 'priority']);
 
       // Versions live on deliverables (a version is of the video, not of a
       // single stage). Read access mirrors the deliverable; write is manager

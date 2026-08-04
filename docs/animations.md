@@ -55,7 +55,7 @@ Use Vue's `<TransitionGroup>` with the `name="list"` classes (Recipe 4 in `trans
 
 ```html
 <TransitionGroup name="list" tag="div" class="space-y-2">
-  <TaskCard v-for="tk in tasksByStatus(s)" :key="tk.id" :task="tk" />
+  <TaskCard v-for="tk in tasksInColumn(col)" :key="tk.id" :task="tk" />
 </TransitionGroup>
 ```
 
@@ -74,6 +74,7 @@ Use Vue's `<TransitionGroup>` with the `name="list"` classes (Recipe 4 in `trans
 - Durations **200–350ms**. Easing `cubic-bezier(0.4, 0, 0.2, 1)`.
 - **Where the CSS lives:** within-page Vue `<Transition>`/`<TransitionGroup>` CSS also lives in `src/assets/css/transitions.css`, as shared numbered recipes (e.g. Recipe 4 `list`, Recipe 6 `overlay`, Recipe 7 `toast`, Recipe 10 `tour-step`) — not in component `<style>` blocks.
 - **Exempt micro-interactions:** Tailwind hover/focus color-feedback utilities (`transition-colors`, hover background shifts, etc.) don't count as animations here — the 200–350ms rule governs enter/leave and view transitions, not instant pointer feedback.
+- **Exempt busy indicators:** a looping spinner (Recipe 11 `.refresh-spin`, used by `RefreshButton.vue`) has no start or end state to land on, so the 200–350ms duration rule doesn't apply to it. Everything else still does — transform-only, and killed under `prefers-reduced-motion` (the button's disabled state carries the "working" signal on its own).
 - `view-transition-name` values must be **unique per page** at any moment.
 - Always test with **reduced motion** on — Recipe 3 kills all view-transition animation under `prefers-reduced-motion: reduce`.
 - **Never** nest `startViewTransition` calls, and never call it outside the router wrapper.

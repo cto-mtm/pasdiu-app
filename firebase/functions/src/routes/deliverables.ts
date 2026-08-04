@@ -156,6 +156,12 @@ deliverablesRouter.post(
           stageSummary: [], // trigger will fill on first task write
           name: input.names[i],
           status: "active",
+          // The whole batch shares one priority; individual deliverables are
+          // re-prioritised afterwards from the board. The schema defaults this
+          // to "normal", and the ?? keeps the write valid anyway — Firestore
+          // rejects an explicit `undefined`, so a missing default would 500 the
+          // entire batch rather than degrade.
+          priority: input.priority ?? "normal",
           clientVisible: input.clientVisible ?? false,
           latestVersionUrl: "",
           order: i,

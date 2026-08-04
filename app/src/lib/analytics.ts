@@ -38,7 +38,10 @@ export type AnalyticsEvent =
   | 'checkout_completed'
   // Retention signals
   | 'workspace_left'
-  | 'invite_auto_accepted'
+  // Refusing an invitation. Worth measuring on its own: a rising decline rate
+  // says invitations are reaching the wrong people, which an accept count
+  // alone cannot distinguish from invitations nobody opened.
+  | 'invite_declined'
 
 const KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined
 

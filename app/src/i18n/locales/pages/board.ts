@@ -19,7 +19,12 @@ const en = {
   subGroupExplainer: 'A sub-group is a batch within a project \u2014 e.g. "July", "August", "Teasers". Use it to organize work into manageable chunks that repeat or rotate.',
   subGroupPlaceholder: 'e.g. July batch',
   editSubGroup: 'Edit sub-group',
+  needSubGroupFirst: 'Create a sub-group first — tasks live inside one.',
   noDeliverables: 'No deliverables yet.',
+  loadEarlier: 'Load earlier sub-groups',
+  pagedHint: 'Showing the most recent sub-groups only.',
+  filterSubGroup: 'Filter by sub-group',
+  allSubGroups: 'All sub-groups',
 }
 
 const es: typeof en = {
@@ -43,7 +48,12 @@ const es: typeof en = {
   subGroupExplainer: 'Un subgrupo es un lote dentro de un proyecto \u2014 p. ej. \u00abJulio\u00bb, \u00abAgosto\u00bb, \u00abTeasers\u00bb. \u00dasalo para organizar el trabajo en bloques manejables que se repiten o rotan.',
   subGroupPlaceholder: 'p. ej. Lote de julio',
   editSubGroup: 'Editar subgrupo',
+  needSubGroupFirst: 'Crea primero un subgrupo — las tareas viven dentro de uno.',
   noDeliverables: 'Aun no hay entregables.',
+  loadEarlier: 'Cargar subgrupos anteriores',
+  pagedHint: 'Mostrando solo los subgrupos más recientes.',
+  filterSubGroup: 'Filtrar por subgrupo',
+  allSubGroups: 'Todos los subgrupos',
 }
 
 export default { en, es }

@@ -2,8 +2,15 @@
 // Fluid segmented toggle (e.g. the Kanban ↔ List switch on the board).
 // v-model holds the active value; options render left to right.
 // When an option carries an `icon`, the segment renders the icon and the
-// label becomes its accessible name (aria-label + title tooltip).
-defineProps<{ options: { value: T; label: string; icon?: 'kanban' | 'list' | 'grid' }[] }>()
+// label becomes its accessible name (aria-label + title tooltip) — unless
+// `showLabels` is set, in which case icon AND text render together. Icon-only
+// is fine for two familiar layouts; it stops being self-explanatory the moment
+// a third, less-guessable mode joins them.
+// `badge` appends a count to a segment so it reads as content, not just a mode.
+defineProps<{
+  options: { value: T; label: string; icon?: 'kanban' | 'list' | 'grid'; badge?: number }[]
+  showLabels?: boolean
+}>()
 
 const model = defineModel<T>({ required: true })
 
@@ -24,14 +31,14 @@ const ICONS: Record<'kanban' | 'list' | 'grid', string[]> = {
       v-for="opt in options"
       :key="opt.value"
       type="button"
-      class="flex items-center justify-center whitespace-nowrap px-3 py-1.5 text-sm transition-colors"
+      class="flex items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-sm transition-colors"
       :style="{
         background: model === opt.value ? 'var(--accent-cyan)' : 'transparent',
         color: model === opt.value ? 'var(--bg)' : 'var(--text-muted)',
       }"
       :aria-pressed="model === opt.value"
       :aria-label="opt.label"
-      :title="opt.icon ? opt.label : undefined"
+      :title="opt.icon && !showLabels ? opt.label : undefined"
       @click="model = opt.value"
     >
       <svg
@@ -47,7 +54,15 @@ const ICONS: Record<'kanban' | 'list' | 'grid', string[]> = {
       >
         <path v-for="(p, i) in ICONS[opt.icon]" :key="i" :d="p" />
       </svg>
-      <template v-else>{{ opt.label }}</template>
+      <template v-if="!opt.icon || showLabels">{{ opt.label }}</template>
+      <span
+        v-if="opt.badge"
+        class="rounded-full px-1.5 text-xs tabular-nums"
+        :style="{
+          background: model === opt.value ? 'rgba(0,0,0,0.18)' : 'var(--surface-2)',
+          color: model === opt.value ? 'var(--bg)' : 'var(--text-muted)',
+        }"
+      >{{ opt.badge }}</span>
     </button>
   </div>
 </template>

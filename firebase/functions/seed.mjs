@@ -128,10 +128,19 @@ async function seedOrgs() {
     // Entitlement counters: real counts derived from the seeded arrays below.
     // `seats` counts TEAM members only — client-role reviewers are free and
     // unlimited on every plan, so they never occupy a seat.
+    //
+    // activeTasks must count the deliverables' STAGE-tasks too. They are task
+    // documents like any other, the rules' underTaskLimit gate reads this
+    // counter, and counting only the standalone TASKS array left the emulator
+    // reporting 12 where 31 documents existed — so the plan gate behaved
+    // differently in dev than it does against real data.
     batch.set(db.doc(`orgs/${org.id}/usage/current`), {
       seats: org.members.filter((m) => m.role !== "client").length,
       activeClients: CLIENTS.filter((c) => c.orgId === org.id).length,
-      activeTasks: TASKS.filter((t) => subGroupOf(t.sg).orgId === org.id).length,
+      activeTasks:
+        TASKS.filter((t) => subGroupOf(t.sg).orgId === org.id).length
+        + DELIVERABLES.filter((d) => d.orgId === org.id)
+          .reduce((n, d) => n + stagesFor(d).length, 0),
       activeDeliverables: DELIVERABLES.filter((d) => d.orgId === org.id && d.status === "active").length,
     });
   }
@@ -169,9 +178,15 @@ const PROJECTS = [
     brief: { brandGuidelinesUrl: "https://example.com/beacon/brand.pdf", sopUrl: "", links: ["Shot list"], fields: [{ label: "Aspect ratio", value: "1:1" }] } },
 ];
 
+// The board pages sub-groups: it loads the newest few (highest `order`) and
+// offers "load earlier" for the rest. `p_summer` deliberately carries FOUR so
+// that path is reachable in local dev — with only two, every project fits on
+// the first page and the pagination UI never appears.
 const SUBGROUPS = [
-  { id: "sg_reels", orgId: "o_pasdiu", projectId: "p_summer", name: "Instagram Reels", order: 0 },
-  { id: "sg_yt", orgId: "o_pasdiu", projectId: "p_summer", name: "YouTube Cutdowns", order: 1 },
+  { id: "sg_may", orgId: "o_pasdiu", projectId: "p_summer", name: "May archive", order: 0 },
+  { id: "sg_june", orgId: "o_pasdiu", projectId: "p_summer", name: "June archive", order: 1 },
+  { id: "sg_reels", orgId: "o_pasdiu", projectId: "p_summer", name: "Instagram Reels", order: 2 },
+  { id: "sg_yt", orgId: "o_pasdiu", projectId: "p_summer", name: "YouTube Cutdowns", order: 3 },
   { id: "sg_hero", orgId: "o_pasdiu", projectId: "p_sizzle", name: "Hero Film", order: 0 },
   { id: "sg_tiktok", orgId: "o_pasdiu", projectId: "p_q3", name: "TikToks", order: 0 },
   { id: "sg_gifs", orgId: "o_pasdiu", projectId: "p_q3", name: "Newsletter GIFs", order: 1 },
@@ -183,6 +198,9 @@ const SUBGROUPS = [
 // (internal work like grades, sound mixes, and backlog stays hidden).
 // blocked/delivered document themselves via blockedReason / deliveryNote.
 const TASKS = [
+  // Older batches — off the board's first page until "load earlier" is used.
+  { id: "t14", sg: "sg_may", title: "May recap reel", status: "done", assignee: "u_editor", due: -60, order: 0, versions: 1, visible: true },
+  { id: "t15", sg: "sg_june", title: "June recap reel", status: "done", assignee: "u_editor2", due: -30, order: 0, versions: 1, visible: true },
   { id: "t1", sg: "sg_reels", title: "Reel 01 — Teaser", status: "in_progress", assignee: "u_editor", due: 2, order: 0, versions: 2, visible: true },
   { id: "t2", sg: "sg_reels", title: "Reel 02 — Product hero", status: "revisions", assignee: "u_editor2", due: 1, order: 1, versions: 3, visible: true },
   { id: "t3", sg: "sg_reels", title: "Reel 03 — Testimonial", status: "backlog", assignee: "u_editor", due: 5, order: 2, versions: 0, visible: false },
@@ -201,6 +219,13 @@ const TASKS = [
 
 function subGroupOf(sgId) {
   return SUBGROUPS.find((s) => s.id === sgId);
+}
+// The stages a deliverable actually instantiates as tasks (skipped ones make
+// no task). Single source of truth for both the usage counter above and the
+// stage-task seeding below, so the two can't drift.
+function stagesFor(d) {
+  const skip = new Set(d.skipStageIds ?? []);
+  return DEFAULT_STAGES.filter((s) => !skip.has(s.id));
 }
 function clientOf(projectId) {
   return PROJECTS.find((p) => p.id === projectId).clientId;
@@ -233,9 +258,9 @@ const DEFAULT_STAGES = DEFAULT_PIPELINE_STAGES;
 // deliverable's current stage forever.
 const DELIVERABLES = [
   { id: "del_1", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 01 — Teaser", status: "active", clientVisible: true, order: 0, versions: 2, dueInDays: 6 },
-  { id: "del_2", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 02 — Product hero", status: "active", clientVisible: true, order: 1, versions: 3, dueInDays: 9 },
+  { id: "del_2", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 02 — Product hero", status: "active", priority: "high", clientVisible: true, order: 1, versions: 3, dueInDays: 9 },
   // Skips the optional Discovery stage: four stage-tasks, not five.
-  { id: "del_3", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 03 — Testimonial", status: "active", clientVisible: false, order: 2, versions: 0, dueInDays: 12, skipStageIds: ["s_discovery"] },
+  { id: "del_3", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_reels", subGroupName: "Instagram Reels", typeId: "dt_short_pasdiu", name: "Reel 03 — Testimonial", status: "active", priority: "low", clientVisible: false, order: 2, versions: 0, dueInDays: 12, skipStageIds: ["s_discovery"] },
   { id: "del_4", orgId: "o_pasdiu", clientId: "c_aurora", projectId: "p_summer", subGroupId: "sg_yt", subGroupName: "YouTube Cutdowns", typeId: "dt_longform_pasdiu", name: "60s Cutdown", status: "delivered", clientVisible: true, order: 0, versions: 2, dueInDays: -4, approvedBy: "u_client", approvedVia: "portal", approvalNote: "Looks great — approved!" },
   { id: "del_5", orgId: "o_northlight", clientId: "c_beacon", projectId: "p_roast", subGroupId: "sg_spots", subGroupName: "Launch Spots", typeId: "dt_short_north", name: "Spot 01 — Roast reveal", status: "active", clientVisible: true, order: 0, versions: 1, dueInDays: 8 },
 ];
@@ -376,6 +401,9 @@ async function seedData() {
       stageSummary: [],
       name: d.name,
       status: d.status,
+      // Mostly "normal" so the priority chip stays an exception, with one of
+      // each extreme to exercise the sort.
+      priority: d.priority ?? "normal",
       clientVisible: d.clientVisible,
       latestVersionUrl: "",
       order: d.order,
@@ -426,8 +454,7 @@ async function seedData() {
   const stageStatuses = ["done", "done", "in_progress", "backlog", "backlog"];
   const stageAssignees = ["u_editor", "u_editor", "u_editor2", "u_editor2", "u_editor"];
   for (const d of DELIVERABLES) {
-    const skip = new Set(d.skipStageIds ?? []);
-    const stages = DEFAULT_STAGES.filter((s) => !skip.has(s.id));
+    const stages = stagesFor(d);
     const stageDue = stageDueDates(stages, dueDay(d.dueInDays), "end");
     for (let si = 0; si < stages.length; si++) {
       const stage = stages[si];

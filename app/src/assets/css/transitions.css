@@ -207,3 +207,24 @@
     transition: none;
   }
 }
+
+/* ════════════════════════════════════════════════════════════
+   Recipe 11 — REFRESH SPINNER (.refresh-spin)
+   A busy indicator, not an enter/leave transition, so the 200–350ms rule in
+   docs/animations.md doesn't apply — it has no start or end state to land on.
+   Still transform-only, and still stops dead under reduced motion (the button's
+   disabled state already communicates "working").
+   ════════════════════════════════════════════════════════════ */
+.refresh-spin {
+  animation: refresh-spin 800ms linear infinite;
+}
+@keyframes refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .refresh-spin {
+    animation: none;
+  }
+}

@@ -19,6 +19,12 @@ const en = {
   metaLabel: 'Details & references',
   metaHint: 'Add brief info, reference links, specs, or any other metadata for this deliverable.',
   addMeta: 'Add details & references',
+  priorityLabel: 'Priority',
+  priorityHigh: 'High',
+  priorityNormal: 'Normal',
+  priorityLow: 'Low',
+  sortByPriority: 'Priority first',
+  sortByOrder: 'Batch order',
 }
 
 const es: typeof en = {
@@ -42,6 +48,12 @@ const es: typeof en = {
   metaLabel: 'Detalles y referencias',
   metaHint: 'Agrega informaci\u00f3n del brief, enlaces de referencia, especificaciones u otros datos para este entregable.',
   addMeta: 'Agregar detalles y referencias',
+  priorityLabel: 'Prioridad',
+  priorityHigh: 'Alta',
+  priorityNormal: 'Normal',
+  priorityLow: 'Baja',
+  sortByPriority: 'Prioridad primero',
+  sortByOrder: 'Orden del lote',
 }
 
 export default { en, es }

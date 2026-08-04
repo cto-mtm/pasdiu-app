@@ -108,6 +108,12 @@ export function acceptInviteApi(orgId: string, inviteId: string): Promise<ApiRes
   return apiFetch<{ orgId: string }>(`/orgs/${orgId}/invites/${inviteId}/accept`, { method: 'POST' })
 }
 
+// Refusing an invitation. Recorded as 'declined' rather than deleted so the
+// inviting manager can tell a refusal from an invite nobody has opened.
+export function declineInviteApi(orgId: string, inviteId: string): Promise<ApiResult<{ declined: true }>> {
+  return apiFetch<{ declined: true }>(`/orgs/${orgId}/invites/${inviteId}/decline`, { method: 'POST' })
+}
+
 // Pending invites addressed to the authenticated user's email — used at login
 // to surface invitations the user hasn't seen (e.g. never received the email).
 export interface PendingInvite {
@@ -115,6 +121,8 @@ export interface PendingInvite {
   inviteId: string
   orgName: string
   role: Role
+  /** Display name of whoever sent it; '' if their membership is gone. */
+  invitedByName: string
 }
 
 export function fetchMyInvitesApi(): Promise<ApiResult<{ invites: PendingInvite[] }>> {

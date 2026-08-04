@@ -16,6 +16,13 @@ cd firebase
 firebase emulators:exec --only firestore --project demo-app "npm test"
 ```
 
+> **Currently broken:** `@firebase/rules-unit-testing` is not declared as a
+> dependency anywhere — `firebase/package.json` has no dependency block and
+> `firebase/` is not one of the root workspaces — so the command above fails
+> with `ERR_MODULE_NOT_FOUND` before any test runs. Rules tests written since
+> this broke have never executed. Fix the dependency before trusting a green
+> run here, and delete this note when you do.
+
 ## Layer 2 — Cloud Functions API integration tests
 
 What they guard: the Express API in `firebase/functions/src/api.ts` — real

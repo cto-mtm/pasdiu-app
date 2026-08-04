@@ -8,8 +8,10 @@ import { useToastStore } from '../stores/toast'
 import { useBusy } from '../composables/useBusy'
 import { mapDeliverable } from '../lib/mappers'
 import { apiFetch } from '../lib/api'
+import { priorityRank } from '../lib/types'
 import type { Deliverable } from '../lib/types'
 import BaseButton from '../components/BaseButton.vue'
+import PriorityBadge from '../components/PriorityBadge.vue'
 import Modal from '../components/Modal.vue'
 import ModalFooter from '../components/ModalFooter.vue'
 
@@ -20,13 +22,18 @@ const { busy, run } = useBusy()
 
 const deliverables = ref<Deliverable[]>([])
 
-// Group deliverables by batch (subGroupName).
+// Group deliverables by batch (subGroupName). Within a batch, high priority
+// comes first — the client's attention should land where the agency needs a
+// decision — with batch order as the tiebreak so the list stays stable.
 const batches = computed(() => {
   const map = new Map<string, { name: string; items: Deliverable[] }>()
   for (const d of deliverables.value) {
-    const key = d.subGroupName || 'Ungrouped'
+    const key = d.subGroupName || t('portal.ungrouped')
     if (!map.has(key)) map.set(key, { name: key, items: [] })
     map.get(key)!.items.push(d)
+  }
+  for (const batch of map.values()) {
+    batch.items.sort((a, b) => (priorityRank(a.priority) - priorityRank(b.priority)) || a.order - b.order)
   }
   return Array.from(map.values())
 })
@@ -149,9 +156,10 @@ onMounted(load)
             class="flex items-center justify-between px-4 py-3"
             style="background: var(--surface);"
           >
-            <div>
+            <div class="flex flex-wrap items-center gap-2">
               <span class="text-sm font-medium" style="color: var(--text);">{{ del.name }}</span>
-              <span v-if="del.approvedVia" class="ml-2 text-xs" style="color: var(--accent-emerald);">
+              <PriorityBadge :priority="del.priority" />
+              <span v-if="del.approvedVia" class="text-xs" style="color: var(--accent-emerald);">
                 ✓ {{ t('portal.approvedLabel') }}
                 <template v-if="del.approvedVia === 'in_person'"> ({{ t('portal.onBehalf') }})</template>
               </span>

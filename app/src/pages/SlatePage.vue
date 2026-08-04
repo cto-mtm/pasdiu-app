@@ -6,6 +6,7 @@ import { useAuthStore } from '../stores/auth'
 import { isDoneStatus } from '../lib/status'
 import TaskCard from '../components/TaskCard.vue'
 import SegmentedControl from '../components/SegmentedControl.vue'
+import RefreshButton from '../components/RefreshButton.vue'
 
 const { t } = useI18n()
 const data = useDataStore()
@@ -53,10 +54,12 @@ const groupedByProject = computed<TaskGroup[]>(() =>
 )
 
 const loadFailed = ref(false)
-async function load() {
+// `force` comes from the refresh control — assigned work changes underneath a
+// contractor constantly, so this is the surface that most needs a re-read.
+async function load(force = false) {
   loadFailed.value = false
   try {
-    await Promise.all([data.loadUsers(), data.loadClients()])
+    await Promise.all([data.loadUsers(force), data.loadClients(force)])
     if (auth.profile) await data.loadAssignedTasks(auth.profile.uid)
   } catch {
     loadFailed.value = true
@@ -64,13 +67,12 @@ async function load() {
 }
 onMounted(load)
 
-// Lazy-load projects only when the user first switches to project grouping.
-const projectsLoaded = ref(false)
+// Lazy-load projects only when the user switches to project grouping.
+// loadAllProjects is memoized with a TTL, so calling it on every switch costs
+// nothing while fresh and picks up changes once it isn't — which a local
+// "already loaded" flag would have hidden for the rest of the session.
 watch(groupBy, async (v) => {
-  if (v === 'project' && !projectsLoaded.value) {
-    await data.loadAllProjects()
-    projectsLoaded.value = true
-  }
+  if (v === 'project') await data.loadAllProjects()
 })
 </script>
 
@@ -80,7 +82,7 @@ watch(groupBy, async (v) => {
     <p class="mt-1 text-sm" style="color: var(--text-muted);">{{ t('slate.subtitle') }}</p>
 
     <!-- Grouping toggle -->
-    <div class="mt-4">
+    <div class="mt-4 flex items-center gap-2">
       <SegmentedControl
         v-model="groupBy"
         :options="[
@@ -89,11 +91,12 @@ watch(groupBy, async (v) => {
           { value: 'project', label: t('slate.byProject') },
         ]"
       />
+      <RefreshButton :on-refresh="() => load(true)" />
     </div>
 
     <div v-if="loadFailed" class="mt-8">
       <p class="text-sm" style="color: var(--accent-amber);">{{ t('common.loadError') }}</p>
-      <button class="mt-2 text-sm underline" style="color: var(--accent-cyan);" @click="load">
+      <button class="mt-2 text-sm underline" style="color: var(--accent-cyan);" @click="load(true)">
         {{ t('common.retry') }}
       </button>
     </div>

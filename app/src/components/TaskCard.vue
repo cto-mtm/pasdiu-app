@@ -2,11 +2,11 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import type { Task, TaskStatus } from '../lib/types'
-import { TASK_STATUSES } from '../lib/types'
+import type { Task } from '../lib/types'
 import { useAuthStore } from '../stores/auth'
 import { useDataStore } from '../stores/data'
-import { isDoneStatus, statusKey } from '../lib/status'
+import { useTaskStatusChange } from '../composables/useTaskStatusChange'
+import { statusKey } from '../lib/status'
 import StatusBadge from './StatusBadge.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 
@@ -17,35 +17,16 @@ const router = useRouter()
 const auth = useAuthStore()
 const data = useDataStore()
 
-const isDone = computed(() => isDoneStatus(props.task.status))
 const subGroupName = computed(() => data.subGroups.find((s) => s.id === props.task.subGroupId)?.name ?? '')
 
-// Mirrors the Firestore rules: contractors may only change the status of
-// tasks assigned to them, and may never set 'approved' (that's client-only,
-// via the review surface). Managers keep the full select.
-const canChangeStatus = computed(
-  () => auth.isManager || (auth.role === 'contractor' && props.task.assigneeUid === auth.profile?.uid),
-)
-const statusOptions = computed<TaskStatus[]>(() =>
-  // Non-managers never get 'approved' as a target — but if it's the task's
-  // current status, keep it listed so the select still shows the truth.
-  auth.isManager
-    ? TASK_STATUSES
-    : TASK_STATUSES.filter((s) => s !== 'approved' || s === props.task.status),
-)
-
-// Status changes go through a confirmation step. Moving to 'blocked'
-// requires documenting why; moving to 'delivered' takes an optional
-// delivery note (link, method, recipient…).
-const confirmOpen = ref(false)
-const pendingStatus = ref<TaskStatus | null>(null)
-const pendingDetail = ref('')
-const needsBlockedReason = computed(() => pendingStatus.value === 'blocked')
-const asksDeliveryNote = computed(() =>
-  pendingStatus.value === 'delivered'
-  || (!!props.task.deliverableId && pendingStatus.value !== null && isDoneStatus(pendingStatus.value))
-)
-const confirmDisabled = computed(() => needsBlockedReason.value && !pendingDetail.value.trim())
+// Permissions + the confirm-with-reason flow live in the composable, shared
+// with the task page so both surfaces enforce exactly the same rules.
+const {
+  isDone, canChangeStatus, statusOptions,
+  confirmOpen, pendingStatus, pendingDetail,
+  needsBlockedReason, asksDeliveryNote, confirmDisabled,
+  requestToggle, onSelect, confirmChange, cancelChange,
+} = useTaskStatusChange(() => props.task)
 
 function open() {
   router.push({ name: 'task', params: { taskId: props.task.id } })
@@ -62,34 +43,6 @@ async function toggleVisibility() {
   } finally {
     togglingVisibility.value = false
   }
-}
-function requestToggle() {
-  pendingStatus.value = isDone.value ? 'in_progress' : 'done'
-  confirmOpen.value = true
-}
-function onSelect(e: Event) {
-  const el = e.target as HTMLSelectElement
-  const v = el.value as TaskStatus
-  el.value = props.task.status // revert the visible value until confirmed
-  if (v !== props.task.status) {
-    pendingStatus.value = v
-    pendingDetail.value = ''
-    confirmOpen.value = true
-  }
-}
-async function confirmChange() {
-  if (pendingStatus.value) {
-    await data.updateTaskStatus(props.task.id, pendingStatus.value, {
-      ...(needsBlockedReason.value ? { blockedReason: pendingDetail.value } : {}),
-      ...(asksDeliveryNote.value ? { deliveryNote: pendingDetail.value } : {}),
-    })
-  }
-  cancelChange()
-}
-function cancelChange() {
-  confirmOpen.value = false
-  pendingStatus.value = null
-  pendingDetail.value = ''
 }
 </script>
 

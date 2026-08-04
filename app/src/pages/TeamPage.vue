@@ -189,8 +189,15 @@ onMounted(load)
             <div class="min-w-0">
               <p class="truncate text-sm" style="color: var(--text);">
                 {{ inv.email }}
+                <!-- Declined wins over expired: "they said no" is the useful
+                     fact, and re-sending a refused invite is not the next move. -->
                 <span
-                  v-if="isExpired(inv)"
+                  v-if="inv.status === 'declined'"
+                  class="ml-1 rounded px-1.5 py-0.5 text-xs font-medium"
+                  style="background: color-mix(in srgb, var(--status-blocked) 15%, transparent); color: var(--status-blocked);"
+                >{{ t('team.declined') }}</span>
+                <span
+                  v-else-if="isExpired(inv)"
                   class="ml-1 rounded px-1.5 py-0.5 text-xs font-medium"
                   style="background: color-mix(in srgb, var(--accent-amber) 15%, transparent); color: var(--accent-amber);"
                 >{{ t('team.expired') }}</span>
@@ -199,7 +206,7 @@ onMounted(load)
             </div>
             <div class="flex shrink-0 items-center gap-2">
               <button
-                v-if="!isExpired(inv)"
+                v-if="!isExpired(inv) && inv.status !== 'declined'"
                 type="button"
                 :disabled="busy"
                 class="rounded-lg px-3 py-2 text-sm transition-colors disabled:opacity-50"
@@ -209,7 +216,7 @@ onMounted(load)
                 {{ t('team.resend') }}
               </button>
               <button
-                v-if="!isExpired(inv)"
+                v-if="!isExpired(inv) && inv.status !== 'declined'"
                 type="button"
                 class="rounded-lg px-3 py-2 text-sm transition-colors"
                 style="color: var(--accent-cyan);"

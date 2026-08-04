@@ -272,6 +272,33 @@ than being hand-written per test.
 - **Package** — what the agency sold: line items of type × quantity × period.
 - **Recording session** — a booked shoot: a date, a set/location, and the
   capture tasks being shot there.
+- **Priority** — `high | normal | low` on the deliverable, defaulting to
+  `normal`. Sets what gets worked and reviewed first; sorted in memory (see
+  data-modeling.md), never a Firestore `orderBy`. Set for a whole batch in the
+  create wizard, then per deliverable from the board or its detail page.
+
+## Task status: seven in the model, four in the picker
+
+`TaskStatus` still has all seven values, but only **backlog / in_progress /
+blocked / done** are offered anywhere a human picks one
+(`MANUAL_TASK_STATUSES` in `app/src/lib/status.ts`). The other three are
+written by flows, not people:
+
+- `approved` and `revisions` — by the client portal's approve / request-changes
+  actions. Constraint 3 above is what makes this load-bearing: the rules permit
+  a client to write **exactly** those two values, so they cannot be removed
+  from the enum without dismantling client approval.
+- `delivered` — by the handoff flow.
+
+The kanban board folds all three into one **In Review** column so work sitting
+with the client stays visible without being something anyone can drag into. A
+task already parked in one of those statuses keeps that value listed in its own
+select, so the control never displays a status the task isn't in.
+
+This is why "simplify the statuses" landed as a picker change rather than an
+enum change: four states is what the pipeline needs now that deliverables carry
+stage progress, but the other three are still the vocabulary the client flow
+speaks in.
 
 ## Open questions to validate with the beta user
 

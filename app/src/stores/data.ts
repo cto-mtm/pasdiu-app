@@ -27,7 +27,7 @@ import { useToastStore } from './toast'
 import { track } from '../lib/analytics'
 import { mapClient, mapDeliverable, mapInvite, mapMember, mapNote, mapProject, mapSubGroup, mapTask, mapVersion } from '../lib/mappers'
 import { isDoneStatus } from '../lib/status'
-import { WorkflowPipelineSchema } from '../lib/types'
+import { priorityRank, WorkflowPipelineSchema } from '../lib/types'
 import type {
   Client, Deliverable, Invite, Project, Role, SubGroup, Task, TaskStatus, Version, Note, UserProfile, MetaField,
   WorkflowStage,
@@ -75,11 +75,27 @@ export const useDataStore = defineStore('data', () => {
   const deliverables = ref<Deliverable[]>([])
   const invites = ref<Invite[]>([])
 
-  // Memo guards for the full-collection loads (cleared by reset()).
-  let usersLoaded = false
-  let clientsLoaded = false
-  let projectsLoaded = false
-  let tasksLoaded = false
+  // Freshness policy for the full-collection loads. These used to be permanent
+  // booleans: loaded once, never re-read for the life of the session, so a
+  // surface never saw anything another user (or another tab) changed. Now each
+  // load records WHEN it ran and re-fetches once it ages out; `force` skips the
+  // check entirely, which is what the explicit refresh controls call.
+  const FRESH_TTL_MS = 5 * 60 * 1000
+  const loadedAt = ref<Record<string, number>>({})
+  function isFresh(key: string): boolean {
+    return Date.now() - (loadedAt.value[key] ?? 0) < FRESH_TTL_MS
+  }
+  function markLoaded(key: string): void {
+    loadedAt.value = { ...loadedAt.value, [key]: Date.now() }
+  }
+  // Force the next load of `key` to re-read. Needed whenever something else
+  // REMOVES docs from a collection the memo claims is fully loaded — without
+  // it the memo would keep vouching for a set it no longer holds.
+  function invalidate(key: string): void {
+    const next = { ...loadedAt.value }
+    delete next[key]
+    loadedAt.value = next
+  }
 
   // Pagination cursors for the full-collection loads (cleared by reset()).
   let tasksCursor: QueryDocumentSnapshot | null = null
@@ -112,14 +128,13 @@ export const useDataStore = defineStore('data', () => {
     tasks.value = []
     deliverables.value = []
     invites.value = []
-    usersLoaded = false
-    clientsLoaded = false
-    projectsLoaded = false
-    tasksLoaded = false
+    loadedAt.value = {}
     tasksCursor = null
     projectsCursor = null
     tasksMayHaveMore.value = false
     projectsMayHaveMore.value = false
+    subGroupCursors.clear()
+    subGroupsMayHaveMore.value = {}
   }
 
   function upsert<T extends { id: string }>(arr: T[], item: T) {
@@ -134,13 +149,13 @@ export const useDataStore = defineStore('data', () => {
   // `force` bypasses (and refreshes) the memo — the roster changes outside
   // this client (invite accepts), so roster surfaces pass true on mount.
   async function loadUsers(force = false): Promise<void> {
-    if (usersLoaded && !force) return
+    if (!force && isFresh('users')) return
     const orgId = requireOrgId()
     const snap = await getDocs(collection(db, 'orgs', orgId, 'members'))
     const map: Record<string, UserProfile> = {}
     snap.forEach((d) => { map[d.id] = mapMember(d.id, d.data()) })
     usersById.value = map
-    usersLoaded = true
+    markLoaded('users')
   }
   function userName(uid: string): string {
     return usersById.value[uid]?.displayName ?? '—'
@@ -152,12 +167,12 @@ export const useDataStore = defineStore('data', () => {
   )
 
   // ── Clients ───────────────────────────────────────────────────
-  async function loadClients(): Promise<void> {
-    if (clientsLoaded) return
+  async function loadClients(force = false): Promise<void> {
+    if (!force && isFresh('clients')) return
     const orgId = requireOrgId()
     const snap = await getDocs(query(collection(db, 'clients'), where('orgId', '==', orgId)))
     clients.value = snap.docs.map((d) => mapClient(d.id, d.data()))
-    clientsLoaded = true
+    markLoaded('clients')
   }
   // Single client by id (rule-compatible for the client role, which can't run
   // an unfiltered clients query).
@@ -187,8 +202,8 @@ export const useDataStore = defineStore('data', () => {
   }
   // First page REPLACES state so remotely deleted docs don't ghost;
   // loadMoreProjects appends from the cursor.
-  async function loadAllProjects(): Promise<void> {
-    if (projectsLoaded) return
+  async function loadAllProjects(force = false): Promise<void> {
+    if (!force && isFresh('projects')) return
     const orgId = requireOrgId()
     const snap = await getDocs(query(
       collection(db, 'projects'),
@@ -199,7 +214,7 @@ export const useDataStore = defineStore('data', () => {
     projects.value = snap.docs.map((d) => mapProject(d.id, d.data()))
     projectsCursor = snap.docs[snap.docs.length - 1] ?? null
     projectsMayHaveMore.value = snap.docs.length === PAGE_SIZE
-    projectsLoaded = true
+    markLoaded('projects')
   }
   async function loadMoreProjects(): Promise<void> {
     if (!projectsMayHaveMore.value || !projectsCursor) return
@@ -230,34 +245,146 @@ export const useDataStore = defineStore('data', () => {
   }
 
   // ── Board: sub-groups + tasks for a project ───────────────────
-  async function loadProjectBoard(projectId: string): Promise<void> {
-    const orgId = requireOrgId()
-    const [sgSnap, tSnap] = await Promise.all([
-      getDocs(query(collection(db, 'subGroups'), where('orgId', '==', orgId), where('projectId', '==', projectId))),
-      getDocs(query(collection(db, 'tasks'), where('orgId', '==', orgId), where('projectId', '==', projectId))),
-    ])
-    sgSnap.forEach((d) => upsert(subGroups.value, mapSubGroup(d.id, d.data())))
-    tSnap.forEach((d) => upsert(tasks.value, mapTask(d.id, d.data())))
+  // Agencies that name a sub-group per month accumulate them forever, and the
+  // board used to read EVERY sub-group and EVERY task of a project on each
+  // visit. It now pages: the newest few sub-groups load on mount and the rest
+  // are pulled on demand.
+  //
+  // Paging key is `order`, not a timestamp — sub-groups have no createdAt, but
+  // `order` is assigned as the sub-group count at creation (see createSubGroup),
+  // so descending `order` IS newest-first, with no schema change or backfill.
+  const RECENT_SUB_GROUP_PAGE = 2
+
+  // Per-project paging state for "load earlier".
+  const subGroupCursors = new Map<string, QueryDocumentSnapshot | null>()
+  const subGroupsMayHaveMore = ref<Record<string, boolean>>({})
+
+  // Firestore caps `in` at 30 values.
+  const IN_LIMIT = 30
+  function chunk<T>(arr: T[], size: number): T[][] {
+    const out: T[][] = []
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
+    return out
   }
 
-  // ── Deliverables for a project (board rows — reads stageSummary, no task docs)
-  async function loadProjectDeliverables(projectId: string): Promise<void> {
+  // Tasks + deliverables for a specific set of sub-groups. Both are scoped by
+  // subGroupId rather than projectId so the reads track the loaded window
+  // instead of the whole project.
+  async function loadChildrenOfSubGroups(subGroupIds: string[]): Promise<void> {
+    if (!subGroupIds.length) return
+    const orgId = requireOrgId()
+    await Promise.all(chunk(subGroupIds, IN_LIMIT).flatMap((ids) => [
+      getDocs(query(collection(db, 'tasks'), where('orgId', '==', orgId), where('subGroupId', 'in', ids)))
+        .then((snap) => snap.forEach((d) => upsert(tasks.value, mapTask(d.id, d.data())))),
+      getDocs(query(collection(db, 'deliverables'), where('orgId', '==', orgId), where('subGroupId', 'in', ids)))
+        .then((snap) => snap.forEach((d) => upsert(deliverables.value, mapDeliverable(d.id, d.data())))),
+    ]))
+  }
+
+  async function loadProjectBoard(projectId: string, pageSize = RECENT_SUB_GROUP_PAGE): Promise<void> {
     const orgId = requireOrgId()
     const snap = await getDocs(query(
-      collection(db, 'deliverables'),
+      collection(db, 'subGroups'),
+      where('orgId', '==', orgId),
+      where('projectId', '==', projectId),
+      orderBy('order', 'desc'),
+      limit(pageSize),
+    ))
+    // First page replaces this project's sub-groups (and their children) so
+    // remotely deleted ones don't ghost; loadMoreSubGroups appends.
+    const keptIds = new Set(snap.docs.map((d) => d.id))
+    subGroups.value = subGroups.value.filter((s) => s.projectId !== projectId)
+    const taskCountBefore = tasks.value.length
+    tasks.value = tasks.value.filter((t) => t.projectId !== projectId || keptIds.has(t.subGroupId))
+    deliverables.value = deliverables.value.filter((d) => d.projectId !== projectId || keptIds.has(d.subGroupId))
+    snap.forEach((d) => upsert(subGroups.value, mapSubGroup(d.id, d.data())))
+
+    // If that filter actually dropped tasks, the store no longer holds every
+    // org task even if loadAllTasks ran a minute ago — the Ledger / All Tasks /
+    // Analytics would otherwise hit a memo still claiming freshness and render
+    // the pruned set. Only invalidate when something really went: a project
+    // that fits on one page prunes nothing, and forcing a full re-read on every
+    // board visit would undo the memo for the common case.
+    if (tasks.value.length !== taskCountBefore) invalidate('tasks')
+
+    subGroupCursors.set(projectId, snap.docs[snap.docs.length - 1] ?? null)
+    subGroupsMayHaveMore.value = { ...subGroupsMayHaveMore.value, [projectId]: snap.docs.length === pageSize }
+
+    await loadChildrenOfSubGroups([...keptIds])
+  }
+
+  async function loadMoreSubGroups(projectId: string, pageSize = RECENT_SUB_GROUP_PAGE): Promise<void> {
+    const cursor = subGroupCursors.get(projectId)
+    if (!subGroupsMayHaveMore.value[projectId] || !cursor) return
+    const orgId = requireOrgId()
+    const snap = await getDocs(query(
+      collection(db, 'subGroups'),
+      where('orgId', '==', orgId),
+      where('projectId', '==', projectId),
+      orderBy('order', 'desc'),
+      startAfter(cursor),
+      limit(pageSize),
+    ))
+    snap.forEach((d) => upsert(subGroups.value, mapSubGroup(d.id, d.data())))
+    subGroupCursors.set(projectId, snap.docs[snap.docs.length - 1] ?? cursor)
+    subGroupsMayHaveMore.value = { ...subGroupsMayHaveMore.value, [projectId]: snap.docs.length === pageSize }
+    await loadChildrenOfSubGroups(snap.docs.map((d) => d.id))
+  }
+
+  function projectHasMoreSubGroups(projectId: string): boolean {
+    return subGroupsMayHaveMore.value[projectId] ?? false
+  }
+
+  // EVERY sub-group of a project, unpaged, with no pruning of the store.
+  // The board must not use this — that is the read the paging exists to kill.
+  // The CSV importer must: it dedupes incoming batch names against existing
+  // sub-groups, so a partial view makes it create a second "May archive"
+  // alongside the real one. An explicit admin import is a cold path where the
+  // full read is the correct trade.
+  async function loadAllSubGroupsForProject(projectId: string): Promise<void> {
+    const orgId = requireOrgId()
+    const snap = await getDocs(query(
+      collection(db, 'subGroups'),
       where('orgId', '==', orgId),
       where('projectId', '==', projectId),
     ))
-    // Replace deliverables for this project (don't mix with another project's).
-    deliverables.value = deliverables.value.filter((d) => d.projectId !== projectId)
-    snap.forEach((d) => upsert(deliverables.value, mapDeliverable(d.id, d.data())))
+    snap.forEach((d) => upsert(subGroups.value, mapSubGroup(d.id, d.data())))
   }
 
-  function deliverablesForSubGroup(subGroupId: string): Deliverable[] {
-    return deliverables.value.filter((d) => d.subGroupId === subGroupId).sort((a, b) => a.order - b.order)
+  // NOTE: there is deliberately no "load every deliverable in this project"
+  // helper any more. The board now pages by sub-group and pulls deliverables
+  // through loadChildrenOfSubGroups; an unbounded per-project load would
+  // silently refill the store and undo the paging on the next call.
+  // PackageQuota's numbers come from server-side count() aggregations, so it
+  // never needed the documents in the first place.
+
+  // Batch order by default; `byPriority` puts high first and keeps batch order
+  // as the tiebreak, so the list stays stable rather than reshuffling within a
+  // priority band. Sorted here in memory — every caller already holds the
+  // project's full deliverable set, so this needs no index and no extra read.
+  function deliverablesForSubGroup(subGroupId: string, byPriority = false): Deliverable[] {
+    return deliverables.value
+      .filter((d) => d.subGroupId === subGroupId)
+      .sort((a, b) => (byPriority ? priorityRank(a.priority) - priorityRank(b.priority) : 0) || a.order - b.order)
   }
 
-  async function updateDeliverable(id: string, patch: Partial<Pick<Deliverable, 'name' | 'meta' | 'order' | 'clientVisible' | 'status'>>): Promise<void> {
+  // Single deliverable by id, for surfaces that arrive at one directly (a task's
+  // parent, a deep link) without having loaded its project's board.
+  function getDeliverable(id: string): Deliverable | undefined {
+    return deliverables.value.find((d) => d.id === id)
+  }
+  async function loadDeliverable(id: string): Promise<Deliverable | undefined> {
+    const snap = await getDoc(doc(db, 'deliverables', id))
+    if (!snap.exists()) return undefined
+    const del = mapDeliverable(snap.id, snap.data())
+    // Cross-org deep link: a doc from another org must never enter this
+    // org's store — treat it as not-found.
+    if (del.orgId !== requireOrgId()) return undefined
+    upsert(deliverables.value, del)
+    return del
+  }
+
+  async function updateDeliverable(id: string, patch: Partial<Pick<Deliverable, 'name' | 'meta' | 'order' | 'clientVisible' | 'status' | 'priority'>>): Promise<void> {
     await guarded(() => updateDoc(doc(db, 'deliverables', id), patch))
     const local = deliverables.value.find((d) => d.id === id)
     if (local) Object.assign(local, patch)
@@ -265,6 +392,26 @@ export const useDataStore = defineStore('data', () => {
 
   function subGroupsForProject(projectId: string): SubGroup[] {
     return subGroups.value.filter((s) => s.projectId === projectId).sort((a, b) => a.order - b.order)
+  }
+  function getSubGroup(id: string): SubGroup | undefined {
+    return subGroups.value.find((s) => s.id === id)
+  }
+  async function loadSubGroup(id: string): Promise<SubGroup | undefined> {
+    const snap = await getDoc(doc(db, 'subGroups', id))
+    if (!snap.exists()) return undefined
+    const sg = mapSubGroup(snap.id, snap.data())
+    // Cross-org deep link: a doc from another org must never enter this
+    // org's store — treat it as not-found.
+    if (sg.orgId !== requireOrgId()) return undefined
+    upsert(subGroups.value, sg)
+    return sg
+  }
+  // Pull one sub-group into the board's window even though paging left it out —
+  // used after a batch create aimed at an older batch, so the work that was
+  // just created doesn't land off-screen.
+  async function loadSubGroupWithChildren(id: string): Promise<void> {
+    const sg = await loadSubGroup(id)
+    if (sg) await loadChildrenOfSubGroups([id])
   }
   function tasksForProject(projectId: string): Task[] {
     return tasks.value.filter((t) => t.projectId === projectId).sort((a, b) => a.order - b.order)
@@ -297,8 +444,8 @@ export const useDataStore = defineStore('data', () => {
   // ── All tasks (Ledger + omni-search; managers/contractors) ────
   // First page REPLACES state so remotely deleted docs don't ghost;
   // loadMoreTasks appends from the cursor.
-  async function loadAllTasks(): Promise<void> {
-    if (tasksLoaded) return
+  async function loadAllTasks(force = false): Promise<void> {
+    if (!force && isFresh('tasks')) return
     const orgId = requireOrgId()
     const snap = await getDocs(query(
       collection(db, 'tasks'),
@@ -309,7 +456,7 @@ export const useDataStore = defineStore('data', () => {
     tasks.value = snap.docs.map((d) => mapTask(d.id, d.data()))
     tasksCursor = snap.docs[snap.docs.length - 1] ?? null
     tasksMayHaveMore.value = snap.docs.length === PAGE_SIZE
-    tasksLoaded = true
+    markLoaded('tasks')
   }
   async function loadMoreTasks(): Promise<void> {
     if (!tasksMayHaveMore.value || !tasksCursor) return
@@ -351,8 +498,9 @@ export const useDataStore = defineStore('data', () => {
   }
 
   // Everything a manager surface needs, in one parallel round-trip.
-  async function loadWorkspace(): Promise<void> {
-    await Promise.all([loadUsers(), loadClients(), loadAllProjects(), loadAllTasks()])
+  // `force` is what the refresh control passes: re-read regardless of age.
+  async function loadWorkspace(force = false): Promise<void> {
+    await Promise.all([loadUsers(force), loadClients(force), loadAllProjects(force), loadAllTasks(force)])
   }
 
   // ── Creates (managers only; rules enforce) ────────────────────
@@ -396,9 +544,6 @@ export const useDataStore = defineStore('data', () => {
     const local = getProject(id)
     if (local) Object.assign(local, patch)
   }
-  async function updateProjectBrief(id: string, brief: Project['brief']): Promise<void> {
-    await updateProject(id, { brief })
-  }
   // Edits a member of the ACTIVE org (orgs/{orgId}/members/{uid}) — managers
   // may change role/clientId/displayName; membership create/delete goes
   // through the HTTP API.
@@ -432,11 +577,15 @@ export const useDataStore = defineStore('data', () => {
 
   // ── Invites of the ACTIVE org (managers only; rules enforce) ──
   // Pending only — accepted/revoked invites are history, not UI state.
+  // Pending AND declined: accepted/revoked are history, but a refusal is a
+  // thing the manager needs to see — otherwise "they said no" is
+  // indistinguishable from "they haven't opened it yet" and the invite just
+  // looks stuck.
   async function loadInvites(): Promise<void> {
     const orgId = requireOrgId()
     const snap = await getDocs(query(
       collection(db, 'orgs', orgId, 'invites'),
-      where('status', '==', 'pending'),
+      where('status', 'in', ['pending', 'declined']),
     ))
     invites.value = snap.docs.map((d) => mapInvite(d.id, d.data()))
   }
@@ -570,8 +719,17 @@ export const useDataStore = defineStore('data', () => {
       patch.blockedReason = '' // moved on — reason is stale
       patch.blockedAt = null
     }
-    if (status === 'delivered' && detail?.deliveryNote !== undefined) {
-      patch.deliveryNote = detail.deliveryNote.trim()
+    // The handoff note rides on ANY terminal status, not just 'delivered'.
+    // `delivered` is no longer something anyone picks by hand, so the path that
+    // actually prompts for a note is completing a stage task — which lands on
+    // 'done'. Gating the write on 'delivered' meant the prompt collected a note
+    // and then silently dropped it.
+    //
+    // Empty is not written: leaving the optional prompt blank must not wipe a
+    // note the task already carries (clearing one is the edit-task modal's job).
+    const note = detail?.deliveryNote?.trim()
+    if (done && note) {
+      patch.deliveryNote = note
     }
     // Optimistic local update for the tactile check-off feel; revert on failure.
     const prev = local
@@ -727,13 +885,16 @@ export const useDataStore = defineStore('data', () => {
     loadUsers, userName, teamMembers,
     loadClients, loadClient, getClient,
     loadProjectsForClient, loadAllProjects, loadMoreProjects, loadProject, getProject,
-    loadProjectBoard, loadProjectDeliverables, deliverablesForSubGroup, updateDeliverable,
-    subGroupsForProject, tasksForProject, getTask, loadTask,
+    loadProjectBoard, loadMoreSubGroups, projectHasMoreSubGroups, loadAllSubGroupsForProject,
+    deliverablesForSubGroup, updateDeliverable,
+    getDeliverable, loadDeliverable,
+    subGroupsForProject, getSubGroup, loadSubGroup, loadSubGroupWithChildren,
+    tasksForProject, getTask, loadTask,
     loadAssignedTasks, tasksForAssignee,
     loadAllTasks, loadMoreTasks, loadTasksForClient, loadAllTasksForClient,
     loadInvites, createInvite, revokeInvite,
     createClient, createProject, createSubGroup, createTask,
-    updateClient, updateProject, updateProjectBrief, updateMember, updateOrgPipeline, updateSubGroup, updateTask,
+    updateClient, updateProject, updateMember, updateOrgPipeline, updateSubGroup, updateTask,
     updateTaskStatus, setProjectTasksVisibility,
     deleteTask, deleteSubGroup, deleteProject, deleteClient,
     loadVersions, loadNotes, addNote, setNoteResolved, addVersion,

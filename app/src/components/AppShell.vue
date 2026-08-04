@@ -6,6 +6,7 @@ import { useEntitlements } from '../composables/useEntitlements'
 import OmniSearch from './OmniSearch.vue'
 import BrandLogo from './BrandLogo.vue'
 import BaseSelect from './BaseSelect.vue'
+import PendingInvites from './PendingInvites.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -80,7 +81,14 @@ function onKeydown(e: KeyboardEvent) {
     searchOpen.value = true
   }
 }
-onMounted(() => window.addEventListener('keydown', onKeydown))
+// Invitations to OTHER workspaces. The store skips this fetch during bootstrap
+// for accounts that already have a membership — it lands here instead, where
+// something actually renders the result. The shell mounts once per signed-in
+// session, so this is one request, not a per-navigation cost.
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+  void auth.loadPendingInvites()
+})
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
@@ -128,6 +136,28 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           @click="open = true"
         >
           {{ auth.activeMembership.orgName.slice(0, 1).toUpperCase() }}
+        </button>
+      </div>
+
+      <!-- Workspaces inviting you, directly under the ones you're already in.
+           Capped and scrollable: invitations must never push the nav out of
+           reach, however many are waiting. -->
+      <div v-if="open && auth.pendingInvites.length" class="max-h-64 overflow-y-auto px-4 pb-3">
+        <PendingInvites />
+      </div>
+
+      <!-- Collapsed rail: a count badge that expands the sidebar to act on
+           them (same affordance as the workspace initial above). -->
+      <div v-else-if="auth.pendingInvites.length" class="flex justify-center pb-3">
+        <button
+          type="button"
+          class="flex h-8 w-8 items-center justify-center rounded-lg text-sm font-semibold transition-colors"
+          style="background: var(--surface-2); color: var(--accent-amber);"
+          :title="t('shell.invitations')"
+          :aria-label="t('shell.invitationsAria', { count: auth.pendingInvites.length })"
+          @click="open = true"
+        >
+          {{ auth.pendingInvites.length }}
         </button>
       </div>
 

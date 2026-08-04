@@ -43,8 +43,13 @@ export const DeliverableTypeInputSchema = z.object({
   order: z.number().int().min(0),
 })
 
+export const DeliverablePrioritySchema = z.enum(['high', 'normal', 'low'])
+
 export const BatchCreateDeliverableSchema = z.object({
   projectId: z.string().min(1),
+  // Defaulted, not required: deliverables created before priority existed —
+  // and callers that don't care — all read as 'normal'.
+  priority: DeliverablePrioritySchema.default('normal'),
   subGroupId: z.string().min(1).optional(),
   subGroupName: z.string().min(1).max(60).optional(),
   typeId: z.string().optional(),

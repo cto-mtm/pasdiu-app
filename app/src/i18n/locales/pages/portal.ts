@@ -16,6 +16,7 @@ const en = {
   changesNotePlaceholder: 'Describe what you\'d like different…',
   submitChanges: 'Submit',
   changesRequested: 'Changes requested',
+  ungrouped: 'Ungrouped',
 }
 
 const es: typeof en = {
@@ -36,6 +37,7 @@ const es: typeof en = {
   changesNotePlaceholder: 'Describe lo que te gustaría diferente…',
   submitChanges: 'Enviar',
   changesRequested: 'Cambios solicitados',
+  ungrouped: 'Sin agrupar',
 }
 
 export default { en, es }

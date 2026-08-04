@@ -292,6 +292,7 @@ export async function seedDeliverable(orgId: string, id: string, over: Doc = {})
         stageSummary: [],
         name: `Deliverable ${id}`,
         status: "active",
+        priority: "normal",
         clientVisible: false,
         latestVersionUrl: "",
         order: 0,

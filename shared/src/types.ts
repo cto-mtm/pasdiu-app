@@ -89,7 +89,10 @@ export interface Invite {
   email: string
   role: Role
   clientId?: string
-  status: 'pending' | 'accepted' | 'revoked'
+  // 'declined' = the invitee refused it. Distinct from 'revoked' (the org
+  // withdrew it) and from a 'pending' invite nobody has opened, which is the
+  // whole point of recording it rather than deleting the doc.
+  status: 'pending' | 'accepted' | 'revoked' | 'declined'
   createdAt: Date | null
   invitedBy: string
   locale?: 'en' | 'es'
@@ -223,6 +226,17 @@ export interface DeliverableType {
 
 export type DeliverableStatus = 'active' | 'delivered' | 'canceled'
 
+// What gets worked on first. Ordered most- to least-urgent so a sort can index
+// into it directly; 'normal' is the default every existing deliverable reads as.
+export type DeliverablePriority = 'high' | 'normal' | 'low'
+
+export const DELIVERABLE_PRIORITIES: DeliverablePriority[] = ['high', 'normal', 'low']
+
+/** Sort rank — lower sorts first. */
+export function priorityRank(p: DeliverablePriority): number {
+  return DELIVERABLE_PRIORITIES.indexOf(p)
+}
+
 export interface StageSummaryEntry {
   stageId: string
   name: string
@@ -280,6 +294,7 @@ export interface Deliverable {
   stageSummary: StageSummaryEntry[]
   name: string
   status: DeliverableStatus
+  priority: DeliverablePriority
   clientVisible: boolean
   latestVersionUrl: string
   order: number

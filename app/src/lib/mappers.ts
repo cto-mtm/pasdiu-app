@@ -5,7 +5,7 @@
 // Normalizers — seed/older docs may lack meta/brief fields, so default them.
 import { FREE_LIMITS } from './plans'
 import type {
-  Client, Deliverable, DeliverableStatus, DeliverableType, Invite, Membership, MetaField, Note, Org, OrgUsage, Package, PackageLine, Plan, Project, RecordingSession, Role, StageSummaryEntry, SubGroup, SubscriptionStatus,
+  Client, Deliverable, DeliverablePriority, DeliverableStatus, DeliverableType, Invite, Membership, MetaField, Note, Org, OrgUsage, Package, PackageLine, Plan, Project, RecordingSession, Role, StageSummaryEntry, SubGroup, SubscriptionStatus,
   Task, TaskStatus, UserProfile, Version, WorkflowPipeline, WorkflowStage,
 } from './types'
 
@@ -194,6 +194,9 @@ export function mapDeliverable(id: string, d: Record<string, unknown>): Delivera
     stageSummary: (d.stageSummary as StageSummaryEntry[]) ?? [],
     name: d.name as string,
     status: (d.status as DeliverableStatus) ?? 'active',
+    // Deliverables created before priority existed carry no field — they are
+    // 'normal', which is also where a fresh one starts.
+    priority: (d.priority as DeliverablePriority) ?? 'normal',
     clientVisible: (d.clientVisible as boolean) ?? false,
     latestVersionUrl: (d.latestVersionUrl as string) ?? '',
     order: (d.order as number) ?? 0,

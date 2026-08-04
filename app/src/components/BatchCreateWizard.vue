@@ -10,8 +10,9 @@ import { useToastStore } from '../stores/toast'
 import { useBusy } from '../composables/useBusy'
 import { apiFetch } from '../lib/api'
 import { fromDateInputValue } from '../lib/dates'
-import { stageDueDates } from '../lib/types'
-import type { WorkflowStage } from '../lib/types'
+import { DELIVERABLE_PRIORITIES, stageDueDates } from '../lib/types'
+import { priorityKey } from '../lib/priority'
+import type { DeliverablePriority, WorkflowStage } from '../lib/types'
 import BaseButton from './BaseButton.vue'
 import BaseInput from './BaseInput.vue'
 import BaseSelect from './BaseSelect.vue'
@@ -21,7 +22,11 @@ const props = defineProps<{
   open: boolean
   projectId: string
 }>()
-const emit = defineEmits<{ close: []; created: [ids: string[]] }>()
+// `targetSubGroupId` is only known when the batch went into an EXISTING
+// sub-group — a newly created one is the project's newest, so the board's
+// first page always picks it up. The board uses it to pull an older batch
+// back into its paged window.
+const emit = defineEmits<{ close: []; created: [ids: string[], targetSubGroupId: string] }>()
 
 const { t, d } = useI18n()
 const data = useDataStore()
@@ -50,6 +55,9 @@ const stageAssignees = ref<Record<string, string[]>>({})
 const dueStartAt = ref('')
 const dueEndAt = ref('')
 const scheduleMode = ref<'start' | 'end'>('end')
+// One priority for the whole batch; individual deliverables are re-prioritised
+// afterwards from the board or the deliverable page.
+const priority = ref<DeliverablePriority>('normal')
 
 // Step 5: Preview + confirm (computed)
 
@@ -165,6 +173,7 @@ async function submit() {
       typeId: typeId.value || undefined,
       names: generatedNames.value,
       clientVisible: false,
+      priority: priority.value,
     }
     if (subGroupMode.value === 'existing') body.subGroupId = subGroupId.value
     else body.subGroupName = subGroupName.value
@@ -190,7 +199,7 @@ async function submit() {
     }
 
     toast.success(t('batchCreate.success', { count: result.data.deliverableCount, tasks: result.data.taskCount }))
-    emit('created', result.data.deliverableIds)
+    emit('created', result.data.deliverableIds, subGroupMode.value === 'existing' ? subGroupId.value : '')
     resetAndClose()
   })
 }
@@ -206,6 +215,7 @@ function resetAndClose() {
   dueStartAt.value = ''
   dueEndAt.value = ''
   scheduleMode.value = 'end'
+  priority.value = 'normal'
   emit('close')
 }
 
@@ -278,6 +288,12 @@ watch(() => props.open, (open) => {
 
       <!-- Step 4: Due window -->
       <div v-if="step === 4" class="space-y-3">
+        <label class="block">
+          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('deliverableDetail.priorityLabel') }}</span>
+          <BaseSelect v-model="priority">
+            <option v-for="p in DELIVERABLE_PRIORITIES" :key="p" :value="p">{{ t(priorityKey(p)) }}</option>
+          </BaseSelect>
+        </label>
         <label class="block">
           <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('batchCreate.dueStart') }}</span>
           <BaseInput v-model="dueStartAt" type="date" />

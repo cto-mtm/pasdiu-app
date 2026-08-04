@@ -8,14 +8,13 @@ import { clientTitleTransitionName } from '../lib/viewTransitions'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
 import BaseButton from '../components/BaseButton.vue'
 import BaseInput from '../components/BaseInput.vue'
-import BaseSelect from '../components/BaseSelect.vue'
 import Modal from '../components/Modal.vue'
 import ModalFooter from '../components/ModalFooter.vue'
 import MetaEditor from '../components/MetaEditor.vue'
 import StatusCounts from '../components/StatusCounts.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import InfoTip from '../components/InfoTip.vue'
-import type { MetaField } from '../lib/types'
+import type { MetaField, Project } from '../lib/types'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -28,18 +27,18 @@ const projects = computed(() => data.projects.filter((p) => p.clientId === clien
 
 const { busy, run } = useBusy()
 
-// Create project
+// Create project. No view picker here — choosing a default layout for a
+// project that has no content yet is a decision with nothing to base it on.
+// It starts on kanban and is changed later from the board's edit modal.
 const showNew = ref(false)
 const name = ref('')
-const view = ref<'kanban' | 'list' | 'deliverables'>('kanban')
 
 async function create() {
   if (!name.value.trim()) return
   await run(async () => {
-    await data.createProject(clientId.value, name.value.trim(), view.value)
+    await data.createProject(clientId.value, name.value.trim(), 'kanban')
     showNew.value = false
     name.value = ''
-    view.value = 'kanban'
   })
 }
 
@@ -74,6 +73,15 @@ async function confirmDelete() {
 
 // Per-project task counts
 const projectTasks = (projectId: string) => data.tasks.filter((tk) => tk.projectId === projectId)
+
+// All three views get their own label — the old two-way ternary rendered a
+// deliverables-first project as "List".
+const VIEW_LABEL_KEYS: Record<Project['defaultView'], string> = {
+  kanban: 'board.viewKanban',
+  list: 'board.viewList',
+  deliverables: 'board.viewDeliverables',
+}
+const viewLabelKey = (v: Project['defaultView']) => VIEW_LABEL_KEYS[v]
 
 const loadError = ref(false)
 const loaded = ref(false)
@@ -136,7 +144,7 @@ onMounted(load)
         <div class="flex items-center justify-between">
           <h3 class="text-base font-semibold" style="color: var(--text);">{{ p.name }}</h3>
           <span class="rounded px-2 py-0.5 text-xs" style="background: var(--surface-2); color: var(--text-muted);">
-            {{ t('board.view' + (p.defaultView === 'kanban' ? 'Kanban' : 'List')) }}
+            {{ t(viewLabelKey(p.defaultView)) }}
           </span>
         </div>
         <div class="mt-3">
@@ -153,13 +161,6 @@ onMounted(load)
             <InfoTip :text="t('client.projectExplainer')" />
           </span>
           <BaseInput v-model="name" autofocus :placeholder="t('client.projectPlaceholder')" />
-        </label>
-        <label class="block">
-          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('actions.viewLabel') }}</span>
-          <BaseSelect v-model="view">
-            <option value="kanban">{{ t('board.viewKanban') }}</option>
-            <option value="list">{{ t('board.viewList') }}</option>
-          </BaseSelect>
         </label>
         <ModalFooter :label="t('actions.create')" :busy="busy" @cancel="showNew = false" @submit="create" />
       </form>
