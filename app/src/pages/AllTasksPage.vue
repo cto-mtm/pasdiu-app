@@ -30,8 +30,23 @@ watch(
 
 const assigneeFilter = ref<string>('all')
 
+// Two row sources. While the live window holds the WHOLE org (the common
+// case), filters are applied client-side over live data. Once the org
+// outgrows the window (tasksMayHaveMore), a client-side filter would
+// silently miss matches beyond it — so active filters switch to a
+// server-side query that is complete at any scale (one-shot + paged, not
+// live; re-selecting the filter re-reads once its freshness lapses).
+const serverFilters = computed(() => ({
+  ...(statusFilter.value !== 'all' ? { status: statusFilter.value } : {}),
+  ...(assigneeFilter.value !== 'all' ? { assigneeUid: assigneeFilter.value } : {}),
+}))
+const filterActive = computed(() => statusFilter.value !== 'all' || assigneeFilter.value !== 'all')
+const usingServerFilter = computed(() => filterActive.value && data.tasksMayHaveMore)
+
 const rows = computed(() =>
-  data.tasks
+  (usingServerFilter.value ? data.filteredTasks : data.tasks)
+    // Both filters re-apply even to server results — cheap, and it keeps the
+    // list right during the brief moment a filter change is still fetching.
     .filter((tk) => statusFilter.value === 'all' || tk.status === statusFilter.value)
     .filter((tk) => assigneeFilter.value === 'all' || tk.assigneeUid === assigneeFilter.value)
     .sort((a, b) => (a.dueAt?.getTime() ?? 0) - (b.dueAt?.getTime() ?? 0)),
@@ -48,10 +63,28 @@ async function load(force = false) {
 }
 onMounted(load)
 
-// Cursor pagination for very large workspaces (loadAllTasks pages at 1000).
+// Fetch the server-side view whenever it becomes the active source — on
+// filter change, or when the first snapshot reveals the window is partial.
+// A single watcher avoids duplicate fetches when both deps update on the
+// same tick (e.g. filter changes while tasksMayHaveMore is already true).
+watch([usingServerFilter, serverFilters], async ([active]) => {
+  if (!active) return
+  try {
+    await data.loadFilteredTasks(serverFilters.value)
+  } catch {
+    loadError.value = true
+  }
+})
+
+// Cursor pagination past the first page — of whichever source is active.
 const { busy: loadingMore, run: runLoadMore } = useBusy()
+const mayHaveMore = computed(() =>
+  usingServerFilter.value ? data.filteredMayHaveMore : data.tasksMayHaveMore,
+)
 async function loadMore() {
-  await runLoadMore(() => data.loadMoreTasks())
+  await runLoadMore(() =>
+    usingServerFilter.value ? data.loadMoreFilteredTasks(serverFilters.value) : data.loadMoreTasks(),
+  )
 }
 </script>
 
@@ -100,7 +133,7 @@ async function loadMore() {
         </TaskRow>
       </div>
 
-      <div v-if="data.tasksMayHaveMore" class="mt-4 flex justify-center">
+      <div v-if="mayHaveMore" class="mt-4 flex justify-center">
         <BaseButton :disabled="loadingMore" @click="loadMore">
           {{ loadingMore ? t('common.loading') : t('allTasks.loadMore') }}
         </BaseButton>

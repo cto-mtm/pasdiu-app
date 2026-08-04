@@ -12,7 +12,6 @@ import Modal from '../components/Modal.vue'
 import ModalFooter from '../components/ModalFooter.vue'
 import MetaEditor from '../components/MetaEditor.vue'
 import SegmentedControl from '../components/SegmentedControl.vue'
-import RefreshButton from '../components/RefreshButton.vue'
 import StatusCounts from '../components/StatusCounts.vue'
 import UpsellModal from '../components/UpsellModal.vue'
 import type { MetaField } from '../lib/types'
@@ -66,11 +65,14 @@ const blockedTasks = computed(() =>
 const taskContext = (clientId: string, projectId: string) =>
   [data.getClient(clientId)?.name, data.getProject(projectId)?.name].filter(Boolean).join(' · ')
 
+// loadWorkspace attaches live listeners — after the first snapshot the page
+// stays current on its own, so there is no refresh control here any more.
+// On error the listeners are cleaned up, so calling load() again re-attaches.
 const loadError = ref(false)
-async function load(force = false) {
+async function load() {
   loadError.value = false
   try {
-    await data.loadWorkspace(force)
+    await data.loadWorkspace()
   } catch {
     loadError.value = true
   }
@@ -93,14 +95,13 @@ onMounted(load)
             { value: 'list', label: t('dashboard.list'), icon: 'list' },
           ]"
         />
-        <RefreshButton :on-refresh="() => load(true)" />
         <BaseButton @click="openNew">+ {{ t('actions.newClient') }}</BaseButton>
       </div>
     </div>
 
     <div v-if="loadError" class="mt-8">
       <p class="text-sm" style="color: var(--text-muted);">{{ t('common.loadError') }}</p>
-      <BaseButton class="mt-3" @click="load(true)">{{ t('common.retry') }}</BaseButton>
+      <BaseButton class="mt-3" @click="load">{{ t('common.retry') }}</BaseButton>
     </div>
 
     <template v-else>

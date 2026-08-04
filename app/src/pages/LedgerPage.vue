@@ -2,11 +2,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDataStore } from '../stores/data'
+import { useBusy } from '../composables/useBusy'
 import { useEntitlements } from '../composables/useEntitlements'
-import { isDoneStatus, statusKey } from '../lib/status'
+import { statusKey } from '../lib/status'
 import { toCsv, downloadCsv } from '../lib/csv'
 import type { TaskStatus } from '../lib/types'
 import BaseButton from '../components/BaseButton.vue'
+import RefreshButton from '../components/RefreshButton.vue'
 
 const { t, d } = useI18n()
 const data = useDataStore()
@@ -30,9 +32,12 @@ interface Row {
   completedAt: Date | null
 }
 
+// Rows come from the ledger's OWN query (completed tasks, newest completion
+// first, paged) — not from the org-wide task window, which only holds the
+// first page of tasks by document id and silently under-reported here.
+// The filters below narrow the loaded pages client-side.
 const rows = computed<Row[]>(() =>
-  data.tasks
-    .filter((tk) => isDoneStatus(tk.status))
+  data.ledgerTasks
     .filter((tk) => clientFilter.value === 'all' || tk.clientId === clientFilter.value)
     .filter((tk) => contractorFilter.value === 'all' || tk.assigneeUid === contractorFilter.value)
     .filter((tk) => statusFilter.value === 'all' || tk.status === statusFilter.value)
@@ -54,32 +59,46 @@ const rows = computed<Row[]>(() =>
     .sort((a, b) => (b.completedAt?.getTime() ?? 0) - (a.completedAt?.getTime() ?? 0)),
 )
 
-function exportCsv() {
-  const headers = [
-    t('ledger.colTask'),
-    t('ledger.colClient'),
-    t('ledger.colProject'),
-    t('ledger.colContractor'),
-    t('ledger.colStatus'),
-    t('ledger.colCompleted'),
-  ]
-  const csv = toCsv(
-    headers,
-    rows.value.map((r) => [r.task, r.client, r.project, r.contractor, t(statusKey(r.status)), r.completedAt?.toISOString() ?? '']),
-  )
-  downloadCsv(`pasdiu-ledger-${new Date().toISOString().slice(0, 10)}.csv`, csv)
+const { busy: exporting, run: runExport } = useBusy()
+async function exportCsv() {
+  await runExport(async () => {
+    // An export is a completeness contract (payroll/accounting) — pull every
+    // remaining page first so the CSV covers ALL matching work, not just the
+    // pages that happen to be on screen.
+    while (data.ledgerMayHaveMore) await data.loadMoreLedger()
+    const headers = [
+      t('ledger.colTask'),
+      t('ledger.colClient'),
+      t('ledger.colProject'),
+      t('ledger.colContractor'),
+      t('ledger.colStatus'),
+      t('ledger.colCompleted'),
+    ]
+    const csv = toCsv(
+      headers,
+      rows.value.map((r) => [r.task, r.client, r.project, r.contractor, t(statusKey(r.status)), r.completedAt?.toISOString() ?? '']),
+    )
+    downloadCsv(`pasdiu-ledger-${new Date().toISOString().slice(0, 10)}.csv`, csv)
+  })
 }
 
 const loadError = ref(false)
 async function load(force = false) {
   loadError.value = false
   try {
-    await data.loadWorkspace(force)
+    // Listeners for the name lookups (client/project/contractor columns);
+    // the ledger query itself is a TTL-memoized pull that `force` re-reads.
+    await Promise.all([data.loadUsers(), data.loadClients(), data.loadAllProjects(), data.loadLedger(force)])
   } catch {
     loadError.value = true
   }
 }
 onMounted(load)
+
+const { busy: loadingMore, run: runLoadMore } = useBusy()
+async function loadMore() {
+  await runLoadMore(() => data.loadMoreLedger())
+}
 </script>
 
 <template>
@@ -89,16 +108,19 @@ onMounted(load)
         <h1 class="text-2xl font-bold tracking-tight" style="color: var(--text);">{{ t('ledger.title') }}</h1>
         <p class="mt-1 text-sm" style="color: var(--text-muted);">{{ t('ledger.subtitle') }}</p>
       </div>
-      <button
-        v-if="has('csvExport')"
-        class="rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-50"
-        style="background: var(--accent-emerald); color: var(--bg);"
-        :disabled="!rows.length"
-        @click="exportCsv"
-      >
-        {{ t('ledger.export') }}
-      </button>
-      <p v-else class="text-xs" style="color: var(--text-muted);">{{ t('billing.csvExportLocked') }}</p>
+      <div class="flex items-center gap-2">
+        <RefreshButton :on-refresh="() => load(true)" />
+        <button
+          v-if="has('csvExport')"
+          class="rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-50"
+          style="background: var(--accent-emerald); color: var(--bg);"
+          :disabled="!rows.length || exporting"
+          @click="exportCsv"
+        >
+          {{ t('ledger.export') }}
+        </button>
+        <p v-else class="text-xs" style="color: var(--text-muted);">{{ t('billing.csvExportLocked') }}</p>
+      </div>
     </div>
 
     <div v-if="loadError" class="mt-8">
@@ -165,6 +187,14 @@ onMounted(load)
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Older completions beyond the loaded pages. Filters apply only to
+           what's loaded, so pulling more can grow the filtered view too. -->
+      <div v-if="data.ledgerMayHaveMore" class="mt-4 flex justify-center">
+        <BaseButton :disabled="loadingMore" @click="loadMore">
+          {{ loadingMore ? t('common.loading') : t('ledger.loadMore') }}
+        </BaseButton>
       </div>
     </template>
   </section>

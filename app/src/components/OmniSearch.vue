@@ -17,9 +17,9 @@ const inputEl = ref<HTMLInputElement | null>(null)
 
 // No private "already loaded" flag: this component outlives every page (it
 // lives in AppShell), so a permanent one would pin the palette to whatever the
-// store held the first time it opened — including a set the board's sub-group
-// paging has since pruned. loadWorkspace() is memoized with a TTL and is a
-// no-op while fresh, so asking on every open is both cheap and correct.
+// store held the first time it opened. loadWorkspace() attaches the org-wide
+// listeners on first call and is free afterwards, so asking on every open is
+// both cheap and correct — and the results are always live.
 async function ensureLoaded() {
   await data.loadWorkspace()
 }

@@ -18,9 +18,14 @@ export function statusColor(s: TaskStatus): string {
 }
 
 // A task counts as finished when it's approved by the client, delivered,
-// or checked done.
+// or checked done. Exported as an array too — the ledger's Firestore query
+// filters on `status in DONE_STATUSES`, which must stay in lockstep with
+// this predicate. Firestore `in` caps at 30 values; blow up early if someone
+// grows this past the limit instead of silently failing at runtime.
+export const DONE_STATUSES: TaskStatus[] = ['done', 'approved', 'delivered']
+if (DONE_STATUSES.length > 30) throw new Error('DONE_STATUSES exceeds Firestore `in` operator limit of 30')
 export function isDoneStatus(s: TaskStatus): boolean {
-  return s === 'done' || s === 'approved' || s === 'delivered'
+  return DONE_STATUSES.includes(s)
 }
 
 // i18n key for a status label, e.g. statusKey('in_progress') → 'status.in_progress'

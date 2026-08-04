@@ -4,10 +4,12 @@ import {
   collection,
   doc,
   documentId,
+  getCountFromServer,
   getDoc,
   getDocs,
   increment,
   limit,
+  onSnapshot,
   query,
   startAfter,
   where,
@@ -18,18 +20,22 @@ import {
   writeBatch,
   Timestamp,
   type DocumentReference,
+  type Query,
+  type QueryConstraint,
   type QueryDocumentSnapshot,
+  type QuerySnapshot,
+  type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { i18n } from '../i18n'
 import { useAuthStore } from './auth'
 import { useToastStore } from './toast'
 import { track } from '../lib/analytics'
-import { mapClient, mapDeliverable, mapInvite, mapMember, mapNote, mapProject, mapSubGroup, mapTask, mapVersion } from '../lib/mappers'
-import { isDoneStatus } from '../lib/status'
-import { priorityRank, WorkflowPipelineSchema } from '../lib/types'
+import { mapClient, mapDeliverable, mapInvite, mapMember, mapNote, mapPackage, mapProject, mapSubGroup, mapTask, mapVersion } from '../lib/mappers'
+import { DONE_STATUSES, isDoneStatus } from '../lib/status'
+import { priorityRank, TASK_STATUSES, WorkflowPipelineSchema } from '../lib/types'
 import type {
-  Client, Deliverable, Invite, Project, Role, SubGroup, Task, TaskStatus, Version, Note, UserProfile, MetaField,
+  Client, Deliverable, Invite, Package, Project, Role, SubGroup, Task, TaskStatus, Version, Note, UserProfile, MetaField,
   WorkflowStage,
 } from '../lib/types'
 
@@ -75,11 +81,11 @@ export const useDataStore = defineStore('data', () => {
   const deliverables = ref<Deliverable[]>([])
   const invites = ref<Invite[]>([])
 
-  // Freshness policy for the full-collection loads. These used to be permanent
-  // booleans: loaded once, never re-read for the life of the session, so a
-  // surface never saw anything another user (or another tab) changed. Now each
-  // load records WHEN it ran and re-fetches once it ages out; `force` skips the
-  // check entirely, which is what the explicit refresh controls call.
+  // Freshness policy for the SCOPED pull loads (board window, client-detail
+  // subset, ledger): each records WHEN it ran and re-fetches once it ages out;
+  // `force` skips the check entirely, which is what the explicit refresh
+  // controls call. The org-wide flat collections no longer use this — they are
+  // live listeners (below) and have no notion of staleness.
   const FRESH_TTL_MS = 5 * 60 * 1000
   const loadedAt = ref<Record<string, number>>({})
   function isFresh(key: string): boolean {
@@ -88,13 +94,61 @@ export const useDataStore = defineStore('data', () => {
   function markLoaded(key: string): void {
     loadedAt.value = { ...loadedAt.value, [key]: Date.now() }
   }
-  // Force the next load of `key` to re-read. Needed whenever something else
-  // REMOVES docs from a collection the memo claims is fully loaded — without
-  // it the memo would keep vouching for a set it no longer holds.
-  function invalidate(key: string): void {
-    const next = { ...loadedAt.value }
-    delete next[key]
-    loadedAt.value = next
+
+  // ── Live listeners (org-wide collections) ─────────────────────
+  // Members, clients, projects, tasks (first window), invites, and per-uid
+  // assigned tasks are onSnapshot listeners rather than getDocs + TTL. The
+  // first attach bills the same reads as the old full fetch; after that only
+  // server-side CHANGES are billed and pushed, so these collections are always
+  // current and never need a manual refresh. With the persistent cache
+  // (lib/firebase.ts) a reload resumes from the last sync token and re-pays
+  // only the delta since the previous session.
+  const listeners = new Map<string, Unsubscribe>()
+  const listenerReady = new Map<string, Promise<void>>()
+
+  // Attach (once) a keyed listener. Resolves after the first snapshot so
+  // callers can await "data is on screen"; later snapshots stream in silently.
+  // On error the listener is detached and forgotten so a page-level retry
+  // attaches a fresh one instead of returning the same rejected promise.
+  function listen(key: string, q: Query, onSnap: (snap: QuerySnapshot) => void): Promise<void> {
+    const existing = listenerReady.get(key)
+    if (existing) return existing
+    const ready = new Promise<void>((resolve, reject) => {
+      let first = true
+      const unsub = onSnapshot(q, (snap) => {
+        onSnap(snap)
+        if (first) { first = false; resolve() }
+      }, (err) => {
+        listeners.get(key)?.()
+        listeners.delete(key)
+        listenerReady.delete(key)
+        if (first) { first = false; reject(err) }
+      })
+      listeners.set(key, unsub)
+    })
+    listenerReady.set(key, ready)
+    return ready
+  }
+
+  // Fold a snapshot's changes into an array ref. `removed` really removes —
+  // for windowed queries that includes docs pushed out of the window by new
+  // arrivals, which matches the old first-page-replaces semantics.
+  //
+  // Reactivity note: `removed` reassigns arr.value (new array identity),
+  // while `added`/`modified` mutate in place via upsert. Both trigger Vue 3
+  // reactivity correctly because ref<T[]> wraps the inner array in a Proxy
+  // that tracks index assignment and .push(). The loop processes docChanges
+  // sequentially; after a `removed` reassignment, subsequent iterations read
+  // the NEW arr.value reference, so upserts land in the right array.
+  function applyChanges<T extends { id: string }>(
+    arr: { value: T[] },
+    snap: QuerySnapshot,
+    map: (id: string, d: Record<string, unknown>) => T,
+  ): void {
+    for (const c of snap.docChanges()) {
+      if (c.type === 'removed') arr.value = arr.value.filter((x) => x.id !== c.doc.id)
+      else upsert(arr.value, map(c.doc.id, c.doc.data()))
+    }
   }
 
   // Pagination cursors for the full-collection loads (cleared by reset()).
@@ -102,6 +156,22 @@ export const useDataStore = defineStore('data', () => {
   let projectsCursor: QueryDocumentSnapshot | null = null
   const tasksMayHaveMore = ref(false)
   const projectsMayHaveMore = ref(false)
+
+  // Ledger state: completed work, newest completion first, paged. Kept apart
+  // from `tasks` so the org-wide window and the ledger never mix pagination
+  // states (see loadLedger).
+  const LEDGER_PAGE_SIZE = 200
+  const ledgerTasks = ref<Task[]>([])
+  const ledgerMayHaveMore = ref(false)
+  let ledgerCursor: QueryDocumentSnapshot | null = null
+
+  // Filtered task view (All Tasks past the live window): one filter combo's
+  // server-side results at a time, paged. See loadFilteredTasks.
+  const FILTERED_PAGE_SIZE = 200
+  const filteredTasks = ref<Task[]>([])
+  const filteredMayHaveMore = ref(false)
+  let filteredCursor: QueryDocumentSnapshot | null = null
+  let filteredKey = ''
 
   // Every query/create is scoped to the active org — reading or writing
   // without one is a programming error, not a state to limp through.
@@ -119,8 +189,13 @@ export const useDataStore = defineStore('data', () => {
   }
 
   // Clear ALL state back to initial — called on sign-out and org switch so
-  // nothing bleeds across accounts or workspaces.
+  // nothing bleeds across accounts or workspaces. Detaching the listeners is
+  // part of that: a live listener left running would keep writing the OLD
+  // org's docs into the store after the switch.
   function reset(): void {
+    for (const unsub of listeners.values()) unsub()
+    listeners.clear()
+    listenerReady.clear()
     usersById.value = {}
     clients.value = []
     projects.value = []
@@ -133,6 +208,13 @@ export const useDataStore = defineStore('data', () => {
     projectsCursor = null
     tasksMayHaveMore.value = false
     projectsMayHaveMore.value = false
+    ledgerTasks.value = []
+    ledgerMayHaveMore.value = false
+    ledgerCursor = null
+    filteredTasks.value = []
+    filteredMayHaveMore.value = false
+    filteredCursor = null
+    filteredKey = ''
     subGroupCursors.clear()
     subGroupsMayHaveMore.value = {}
   }
@@ -145,17 +227,24 @@ export const useDataStore = defineStore('data', () => {
 
   // ── Members of the active org (assignee/author name lookups) ──
   // Kept as `loadUsers`/`usersById` so existing pages keep working; the data
-  // now comes from orgs/{orgId}/members instead of the global users collection.
-  // `force` bypasses (and refreshes) the memo — the roster changes outside
-  // this client (invite accepts), so roster surfaces pass true on mount.
+  // comes from orgs/{orgId}/members. Live listener: invite accepts and
+  // removals made by other sessions land here without a manual refresh.
+  // `force` is accepted for signature compatibility — live data has nothing
+  // to force.
   async function loadUsers(force = false): Promise<void> {
-    if (!force && isFresh('users')) return
+    void force
     const orgId = requireOrgId()
-    const snap = await getDocs(collection(db, 'orgs', orgId, 'members'))
-    const map: Record<string, UserProfile> = {}
-    snap.forEach((d) => { map[d.id] = mapMember(d.id, d.data()) })
-    usersById.value = map
-    markLoaded('users')
+    return listen('users', collection(db, 'orgs', orgId, 'members'), (snap) => {
+      for (const c of snap.docChanges()) {
+        if (c.type === 'removed') {
+          const next = { ...usersById.value }
+          delete next[c.doc.id]
+          usersById.value = next
+        } else {
+          usersById.value = { ...usersById.value, [c.doc.id]: mapMember(c.doc.id, c.doc.data()) }
+        }
+      }
+    })
   }
   function userName(uid: string): string {
     return usersById.value[uid]?.displayName ?? '—'
@@ -167,12 +256,14 @@ export const useDataStore = defineStore('data', () => {
   )
 
   // ── Clients ───────────────────────────────────────────────────
+  // Live listener over the whole org's clients (unpaged — an agency's client
+  // roster is dozens, not thousands).
   async function loadClients(force = false): Promise<void> {
-    if (!force && isFresh('clients')) return
+    void force
     const orgId = requireOrgId()
-    const snap = await getDocs(query(collection(db, 'clients'), where('orgId', '==', orgId)))
-    clients.value = snap.docs.map((d) => mapClient(d.id, d.data()))
-    markLoaded('clients')
+    return listen('clients', query(collection(db, 'clients'), where('orgId', '==', orgId)), (snap) => {
+      applyChanges(clients, snap, mapClient)
+    })
   }
   // Single client by id (rule-compatible for the client role, which can't run
   // an unfiltered clients query).
@@ -190,7 +281,10 @@ export const useDataStore = defineStore('data', () => {
   }
 
   // ── Projects ──────────────────────────────────────────────────
-  async function loadProjectsForClient(clientId: string): Promise<void> {
+  // Scoped pull with a TTL memo — revisiting a client detail page within the
+  // freshness window costs nothing; its refresh control passes `force`.
+  async function loadProjectsForClient(clientId: string, force = false): Promise<void> {
+    if (!force && isFresh(`clientProjects:${clientId}`)) return
     const orgId = requireOrgId()
     const q = query(
       collection(db, 'projects'),
@@ -199,22 +293,26 @@ export const useDataStore = defineStore('data', () => {
     )
     const snap = await getDocs(q)
     snap.forEach((d) => upsert(projects.value, mapProject(d.id, d.data())))
+    markLoaded(`clientProjects:${clientId}`)
   }
-  // First page REPLACES state so remotely deleted docs don't ghost;
-  // loadMoreProjects appends from the cursor.
+  // Live listener over the first PAGE_SIZE projects by document id;
+  // loadMoreProjects appends past the window with one-shot reads. Each
+  // snapshot re-anchors the cursor to the window's end — after a loadMore,
+  // a later snapshot can rewind it, making the next loadMore re-read a page
+  // it already has (upsert dedupes; the cost is a re-read, not wrong data).
   async function loadAllProjects(force = false): Promise<void> {
-    if (!force && isFresh('projects')) return
+    void force
     const orgId = requireOrgId()
-    const snap = await getDocs(query(
+    return listen('projects', query(
       collection(db, 'projects'),
       where('orgId', '==', orgId),
       orderBy(documentId()),
       limit(PAGE_SIZE),
-    ))
-    projects.value = snap.docs.map((d) => mapProject(d.id, d.data()))
-    projectsCursor = snap.docs[snap.docs.length - 1] ?? null
-    projectsMayHaveMore.value = snap.docs.length === PAGE_SIZE
-    markLoaded('projects')
+    ), (snap) => {
+      applyChanges(projects, snap, mapProject)
+      projectsCursor = snap.docs[snap.docs.length - 1] ?? null
+      projectsMayHaveMore.value = snap.docs.length === PAGE_SIZE
+    })
   }
   async function loadMoreProjects(): Promise<void> {
     if (!projectsMayHaveMore.value || !projectsCursor) return
@@ -273,15 +371,25 @@ export const useDataStore = defineStore('data', () => {
   async function loadChildrenOfSubGroups(subGroupIds: string[]): Promise<void> {
     if (!subGroupIds.length) return
     const orgId = requireOrgId()
+    const freshTasks = new Set<string>()
+    const freshDeliverables = new Set<string>()
     await Promise.all(chunk(subGroupIds, IN_LIMIT).flatMap((ids) => [
       getDocs(query(collection(db, 'tasks'), where('orgId', '==', orgId), where('subGroupId', 'in', ids)))
-        .then((snap) => snap.forEach((d) => upsert(tasks.value, mapTask(d.id, d.data())))),
+        .then((snap) => snap.forEach((d) => { freshTasks.add(d.id); upsert(tasks.value, mapTask(d.id, d.data())) })),
       getDocs(query(collection(db, 'deliverables'), where('orgId', '==', orgId), where('subGroupId', 'in', ids)))
-        .then((snap) => snap.forEach((d) => upsert(deliverables.value, mapDeliverable(d.id, d.data())))),
+        .then((snap) => snap.forEach((d) => { freshDeliverables.add(d.id); upsert(deliverables.value, mapDeliverable(d.id, d.data())) })),
     ]))
+    // Reconcile the re-read window: an in-window doc the fresh read didn't
+    // return was deleted remotely — drop it so it can't ghost. Docs OUTSIDE
+    // the window are untouched, so this never fights the org-wide tasks
+    // listener the way the old whole-project prune did.
+    const windowIds = new Set(subGroupIds)
+    tasks.value = tasks.value.filter((t) => !windowIds.has(t.subGroupId) || freshTasks.has(t.id))
+    deliverables.value = deliverables.value.filter((d) => !windowIds.has(d.subGroupId) || freshDeliverables.has(d.id))
   }
 
-  async function loadProjectBoard(projectId: string, pageSize = RECENT_SUB_GROUP_PAGE): Promise<void> {
+  async function loadProjectBoard(projectId: string, force = false, pageSize = RECENT_SUB_GROUP_PAGE): Promise<void> {
+    if (!force && isFresh(`board:${projectId}`)) return
     const orgId = requireOrgId()
     const snap = await getDocs(query(
       collection(db, 'subGroups'),
@@ -290,27 +398,19 @@ export const useDataStore = defineStore('data', () => {
       orderBy('order', 'desc'),
       limit(pageSize),
     ))
-    // First page replaces this project's sub-groups (and their children) so
-    // remotely deleted ones don't ghost; loadMoreSubGroups appends.
-    const keptIds = new Set(snap.docs.map((d) => d.id))
+    // First page replaces this project's sub-group window so remotely deleted
+    // batches don't ghost; loadMoreSubGroups appends. Tasks/deliverables are
+    // NOT pruned here: the board renders only tasks whose sub-group is in the
+    // loaded window (see ProjectBoardPage), so out-of-window docs left in the
+    // store are invisible there while staying valid for the flat surfaces.
     subGroups.value = subGroups.value.filter((s) => s.projectId !== projectId)
-    const taskCountBefore = tasks.value.length
-    tasks.value = tasks.value.filter((t) => t.projectId !== projectId || keptIds.has(t.subGroupId))
-    deliverables.value = deliverables.value.filter((d) => d.projectId !== projectId || keptIds.has(d.subGroupId))
     snap.forEach((d) => upsert(subGroups.value, mapSubGroup(d.id, d.data())))
-
-    // If that filter actually dropped tasks, the store no longer holds every
-    // org task even if loadAllTasks ran a minute ago — the Ledger / All Tasks /
-    // Analytics would otherwise hit a memo still claiming freshness and render
-    // the pruned set. Only invalidate when something really went: a project
-    // that fits on one page prunes nothing, and forcing a full re-read on every
-    // board visit would undo the memo for the common case.
-    if (tasks.value.length !== taskCountBefore) invalidate('tasks')
 
     subGroupCursors.set(projectId, snap.docs[snap.docs.length - 1] ?? null)
     subGroupsMayHaveMore.value = { ...subGroupsMayHaveMore.value, [projectId]: snap.docs.length === pageSize }
 
-    await loadChildrenOfSubGroups([...keptIds])
+    await loadChildrenOfSubGroups(snap.docs.map((d) => d.id))
+    markLoaded(`board:${projectId}`)
   }
 
   async function loadMoreSubGroups(projectId: string, pageSize = RECENT_SUB_GROUP_PAGE): Promise<void> {
@@ -430,33 +530,42 @@ export const useDataStore = defineStore('data', () => {
     return t
   }
 
-  // ── Assigned tasks (Contractor Slate) ─────────────────────────
+  // ── Assigned tasks (Contractor Slate, Team member page) ───────
+  // Live listener per uid — assigned work changes underneath a contractor
+  // constantly, which is exactly what a push channel is for. Reassigning a
+  // task AWAY from this uid emits `removed` and drops it from the store; if
+  // it belongs in the org-wide window, that listener re-adds it.
   async function loadAssignedTasks(uid: string): Promise<void> {
     const orgId = requireOrgId()
-    const q = query(collection(db, 'tasks'), where('orgId', '==', orgId), where('assigneeUid', '==', uid))
-    const snap = await getDocs(q)
-    snap.forEach((d) => upsert(tasks.value, mapTask(d.id, d.data())))
+    return listen(
+      `assigned:${uid}`,
+      query(collection(db, 'tasks'), where('orgId', '==', orgId), where('assigneeUid', '==', uid)),
+      (snap) => applyChanges(tasks, snap, mapTask),
+    )
   }
   function tasksForAssignee(uid: string): Task[] {
     return tasks.value.filter((t) => t.assigneeUid === uid)
   }
 
-  // ── All tasks (Ledger + omni-search; managers/contractors) ────
-  // First page REPLACES state so remotely deleted docs don't ghost;
-  // loadMoreTasks appends from the cursor.
+  // ── All tasks (All Tasks page + omni-search; managers/contractors) ────
+  // Live listener over the first PAGE_SIZE tasks by document id;
+  // loadMoreTasks appends past the window with one-shot reads (same cursor
+  // re-anchoring caveat as loadAllProjects). Analytics/Team/Ledger numbers
+  // deliberately do NOT come from this window — they use the aggregation
+  // counters and the ledger query below, which stay exact past the window.
   async function loadAllTasks(force = false): Promise<void> {
-    if (!force && isFresh('tasks')) return
+    void force
     const orgId = requireOrgId()
-    const snap = await getDocs(query(
+    return listen('tasks', query(
       collection(db, 'tasks'),
       where('orgId', '==', orgId),
       orderBy(documentId()),
       limit(PAGE_SIZE),
-    ))
-    tasks.value = snap.docs.map((d) => mapTask(d.id, d.data()))
-    tasksCursor = snap.docs[snap.docs.length - 1] ?? null
-    tasksMayHaveMore.value = snap.docs.length === PAGE_SIZE
-    markLoaded('tasks')
+    ), (snap) => {
+      applyChanges(tasks, snap, mapTask)
+      tasksCursor = snap.docs[snap.docs.length - 1] ?? null
+      tasksMayHaveMore.value = snap.docs.length === PAGE_SIZE
+    })
   }
   async function loadMoreTasks(): Promise<void> {
     if (!tasksMayHaveMore.value || !tasksCursor) return
@@ -486,8 +595,10 @@ export const useDataStore = defineStore('data', () => {
     snap.forEach((d) => upsert(tasks.value, mapTask(d.id, d.data())))
   }
 
-  // Manager-scoped: load ALL tasks for a specific client (no clientVisible filter).
-  async function loadAllTasksForClient(clientId: string): Promise<void> {
+  // Manager-scoped: load ALL tasks for a specific client (no clientVisible
+  // filter). TTL-memoized per client; the detail page's refresh passes force.
+  async function loadAllTasksForClient(clientId: string, force = false): Promise<void> {
+    if (!force && isFresh(`clientTasks:${clientId}`)) return
     const orgId = requireOrgId()
     const snap = await getDocs(query(
       collection(db, 'tasks'),
@@ -495,10 +606,147 @@ export const useDataStore = defineStore('data', () => {
       where('clientId', '==', clientId),
     ))
     snap.forEach((d) => upsert(tasks.value, mapTask(d.id, d.data())))
+    markLoaded(`clientTasks:${clientId}`)
   }
 
-  // Everything a manager surface needs, in one parallel round-trip.
-  // `force` is what the refresh control passes: re-read regardless of age.
+  // ── Ledger (completed work; scoped + paged) ───────────────────
+  // The Ledger used to compute over the org-wide task window — the first
+  // PAGE_SIZE tasks by document id — which silently under-reported once a
+  // workspace outgrew the window. It now has its own query: completed tasks
+  // only, newest completion first, paged. Composite index:
+  // (orgId, status, completedAt DESC) in firestore.indexes.json.
+  async function loadLedger(force = false): Promise<void> {
+    if (!force && isFresh('ledger')) return
+    const orgId = requireOrgId()
+    const snap = await getDocs(query(
+      collection(db, 'tasks'),
+      where('orgId', '==', orgId),
+      where('status', 'in', DONE_STATUSES),
+      orderBy('completedAt', 'desc'),
+      limit(LEDGER_PAGE_SIZE),
+    ))
+    ledgerTasks.value = snap.docs.map((d) => mapTask(d.id, d.data()))
+    ledgerCursor = snap.docs[snap.docs.length - 1] ?? null
+    ledgerMayHaveMore.value = snap.docs.length === LEDGER_PAGE_SIZE
+    markLoaded('ledger')
+  }
+  async function loadMoreLedger(): Promise<void> {
+    if (!ledgerMayHaveMore.value || !ledgerCursor) return
+    const orgId = requireOrgId()
+    const snap = await getDocs(query(
+      collection(db, 'tasks'),
+      where('orgId', '==', orgId),
+      where('status', 'in', DONE_STATUSES),
+      orderBy('completedAt', 'desc'),
+      startAfter(ledgerCursor),
+      limit(LEDGER_PAGE_SIZE),
+    ))
+    snap.forEach((d) => upsert(ledgerTasks.value, mapTask(d.id, d.data())))
+    ledgerCursor = snap.docs[snap.docs.length - 1] ?? ledgerCursor
+    ledgerMayHaveMore.value = snap.docs.length === LEDGER_PAGE_SIZE
+  }
+
+  // ── Filtered tasks (All Tasks past the live window) ───────────
+  // The org-wide listener only covers the first PAGE_SIZE tasks by document
+  // id, so once a workspace outgrows it, a client-side filter over the store
+  // silently misses matches. When a filter is active AND the window is
+  // incomplete, All Tasks switches to this: a server-side equality query
+  // (status and/or assignee), ordered by dueAt for stable pagination.
+  // One filter combo is held at a time; changing the combo replaces it.
+  // Composite indexes: (orgId, status, dueAt), (orgId, assigneeUid, dueAt),
+  // (orgId, assigneeUid, status, dueAt) in firestore.indexes.json.
+  function filteredConstraints(f: { status?: TaskStatus; assigneeUid?: string }): QueryConstraint[] {
+    const cs: QueryConstraint[] = []
+    if (f.status) cs.push(where('status', '==', f.status))
+    if (f.assigneeUid) cs.push(where('assigneeUid', '==', f.assigneeUid))
+    return cs
+  }
+  async function loadFilteredTasks(f: { status?: TaskStatus; assigneeUid?: string }, force = false): Promise<void> {
+    const key = `${f.status ?? ''}|${f.assigneeUid ?? ''}`
+    if (!force && key === filteredKey && isFresh(`filteredTasks:${key}`)) return
+    const orgId = requireOrgId()
+    const snap = await getDocs(query(
+      collection(db, 'tasks'),
+      where('orgId', '==', orgId),
+      ...filteredConstraints(f),
+      orderBy('dueAt'),
+      limit(FILTERED_PAGE_SIZE),
+    ))
+    filteredKey = key
+    filteredTasks.value = snap.docs.map((d) => mapTask(d.id, d.data()))
+    filteredCursor = snap.docs[snap.docs.length - 1] ?? null
+    filteredMayHaveMore.value = snap.docs.length === FILTERED_PAGE_SIZE
+    markLoaded(`filteredTasks:${key}`)
+  }
+  async function loadMoreFilteredTasks(f: { status?: TaskStatus; assigneeUid?: string }): Promise<void> {
+    const key = `${f.status ?? ''}|${f.assigneeUid ?? ''}`
+    if (key !== filteredKey || !filteredMayHaveMore.value || !filteredCursor) return
+    const orgId = requireOrgId()
+    const snap = await getDocs(query(
+      collection(db, 'tasks'),
+      where('orgId', '==', orgId),
+      ...filteredConstraints(f),
+      orderBy('dueAt'),
+      startAfter(filteredCursor),
+      limit(FILTERED_PAGE_SIZE),
+    ))
+    snap.forEach((d) => upsert(filteredTasks.value, mapTask(d.id, d.data())))
+    filteredCursor = snap.docs[snap.docs.length - 1] ?? filteredCursor
+    filteredMayHaveMore.value = snap.docs.length === FILTERED_PAGE_SIZE
+  }
+
+  // ── Aggregation counters (Analytics, Team) ────────────────────
+  // count() bills one read per 1,000 index entries matched (minimum one), so
+  // these stay exact and near-free at any workspace size — unlike computing
+  // over the windowed `tasks` array, which silently under-counts past the
+  // first page. No counter anywhere should scan documents.
+  async function countTasks(...conditions: QueryConstraint[]): Promise<number> {
+    const orgId = requireOrgId()
+    const snap = await getCountFromServer(query(collection(db, 'tasks'), where('orgId', '==', orgId), ...conditions))
+    return snap.data().count
+  }
+  // The statuses that count as workload — everything isDoneStatus is not.
+  const ACTIVE_STATUSES = TASK_STATUSES.filter((s) => !isDoneStatus(s))
+
+  async function fetchTaskStatusCounts(): Promise<Record<TaskStatus, number>> {
+    const counts = await Promise.all(TASK_STATUSES.map((s) => countTasks(where('status', '==', s))))
+    return Object.fromEntries(TASK_STATUSES.map((s, i) => [s, counts[i]])) as Record<TaskStatus, number>
+  }
+  async function fetchTaskCountsForClients(clientIds: string[]): Promise<Record<string, number>> {
+    const counts = await Promise.all(clientIds.map((id) => countTasks(where('clientId', '==', id))))
+    return Object.fromEntries(clientIds.map((id, i) => [id, counts[i]]))
+  }
+  // Open (non-terminal) tasks per assignee. Composite index:
+  // (orgId, assigneeUid, status) in firestore.indexes.json.
+  async function fetchActiveTaskCounts(uids: string[]): Promise<Record<string, number>> {
+    const counts = await Promise.all(
+      uids.map((uid) => countTasks(where('assigneeUid', '==', uid), where('status', 'in', ACTIVE_STATUSES))),
+    )
+    return Object.fromEntries(uids.map((uid, i) => [uid, counts[i]]))
+  }
+  async function fetchProjectCount(): Promise<number> {
+    const orgId = requireOrgId()
+    const snap = await getCountFromServer(query(collection(db, 'projects'), where('orgId', '==', orgId)))
+    return snap.data().count
+  }
+
+  // ── Packages sold against a project (PackageQuota, board) ─────
+  // One-shot pull returned to the caller rather than held in the store — a
+  // cold path per board visit, and the only sanctioned way to read packages
+  // (components never touch the SDK directly).
+  async function loadPackagesForProject(projectId: string): Promise<Package[]> {
+    const orgId = requireOrgId()
+    const snap = await getDocs(query(
+      collection(db, 'packages'),
+      where('orgId', '==', orgId),
+      where('projectId', '==', projectId),
+    ))
+    return snap.docs.map((d) => mapPackage(d.id, d.data()))
+  }
+
+  // Everything a manager surface needs. Attaches the four org-wide listeners
+  // and resolves once each has delivered its first snapshot; afterwards the
+  // data keeps itself current and repeat calls are free.
   async function loadWorkspace(force = false): Promise<void> {
     await Promise.all([loadUsers(force), loadClients(force), loadAllProjects(force), loadAllTasks(force)])
   }
@@ -576,18 +824,18 @@ export const useDataStore = defineStore('data', () => {
   }
 
   // ── Invites of the ACTIVE org (managers only; rules enforce) ──
-  // Pending only — accepted/revoked invites are history, not UI state.
   // Pending AND declined: accepted/revoked are history, but a refusal is a
   // thing the manager needs to see — otherwise "they said no" is
   // indistinguishable from "they haven't opened it yet" and the invite just
-  // looks stuck.
+  // looks stuck. Live listener: accepts/declines happen in OTHER sessions by
+  // definition, so this is a surface that could never be current via pull.
+  // A status change out of the pending/declined set emits `removed`.
   async function loadInvites(): Promise<void> {
     const orgId = requireOrgId()
-    const snap = await getDocs(query(
+    return listen('invites', query(
       collection(db, 'orgs', orgId, 'invites'),
       where('status', 'in', ['pending', 'declined']),
-    ))
-    invites.value = snap.docs.map((d) => mapInvite(d.id, d.data()))
+    ), (snap) => applyChanges(invites, snap, mapInvite))
   }
   async function createInvite(input: { email: string; role: Role; clientId?: string; title?: string }): Promise<Invite> {
     const orgId = requireOrgId()
@@ -624,7 +872,12 @@ export const useDataStore = defineStore('data', () => {
 
   async function createSubGroup(projectId: string, name: string, meta: MetaField[] = []): Promise<SubGroup> {
     const orgId = requireOrgId()
-    const order = subGroupsForProject(projectId).length
+    // `order` is the board's newest-first paging key, so it must exceed every
+    // existing order. max+1 over the loaded window is safe: board paging loads
+    // the NEWEST (highest-order) sub-groups first, so if any exist, the max is
+    // in the store. The old `length` broke exactly there — a paged window
+    // undercounts, which minted duplicate orders.
+    const order = Math.max(-1, ...subGroupsForProject(projectId).map((s) => s.order)) + 1
     const ref = await guarded(() => addDoc(collection(db, 'subGroups'), { orgId, projectId, name, order, meta }))
     const s: SubGroup = { id: ref.id, orgId, projectId, name, order, meta }
     upsert(subGroups.value, s)
@@ -775,9 +1028,13 @@ export const useDataStore = defineStore('data', () => {
     })
   }
 
+  // Each delete also drops the matching ledger rows — the ledger is a
+  // separate TTL-memoized list, and the memo must not vouch for docs this
+  // client just removed.
   async function deleteTask(id: string): Promise<void> {
     await guarded(() => deleteTaskDeep(id))
     tasks.value = tasks.value.filter((t) => t.id !== id)
+    ledgerTasks.value = ledgerTasks.value.filter((t) => t.id !== id)
   }
   async function deleteSubGroup(id: string): Promise<void> {
     await guarded(async () => {
@@ -793,6 +1050,7 @@ export const useDataStore = defineStore('data', () => {
       )
     })
     tasks.value = tasks.value.filter((t) => t.subGroupId !== id)
+    ledgerTasks.value = ledgerTasks.value.filter((t) => t.subGroupId !== id)
     subGroups.value = subGroups.value.filter((s) => s.id !== id)
   }
   async function deleteProject(id: string): Promise<void> {
@@ -811,6 +1069,7 @@ export const useDataStore = defineStore('data', () => {
     })
     subGroups.value = subGroups.value.filter((s) => s.projectId !== id)
     tasks.value = tasks.value.filter((t) => t.projectId !== id)
+    ledgerTasks.value = ledgerTasks.value.filter((t) => t.projectId !== id)
     projects.value = projects.value.filter((p) => p.id !== id)
   }
   async function deleteClient(id: string): Promise<void> {
@@ -846,6 +1105,7 @@ export const useDataStore = defineStore('data', () => {
     projects.value = projects.value.filter((p) => p.clientId !== id)
     subGroups.value = subGroups.value.filter((s) => !localProjIds.includes(s.projectId))
     tasks.value = tasks.value.filter((t) => t.clientId !== id)
+    ledgerTasks.value = ledgerTasks.value.filter((t) => t.clientId !== id)
     clients.value = clients.value.filter((c) => c.id !== id)
   }
 
@@ -881,6 +1141,10 @@ export const useDataStore = defineStore('data', () => {
   return {
     usersById, clients, projects, subGroups, tasks, deliverables, invites,
     tasksMayHaveMore, projectsMayHaveMore,
+    ledgerTasks, ledgerMayHaveMore, loadLedger, loadMoreLedger,
+    filteredTasks, filteredMayHaveMore, loadFilteredTasks, loadMoreFilteredTasks,
+    fetchTaskStatusCounts, fetchTaskCountsForClients, fetchActiveTaskCounts, fetchProjectCount,
+    loadPackagesForProject,
     reset, loadWorkspace,
     loadUsers, userName, teamMembers,
     loadClients, loadClient, getClient,

@@ -181,8 +181,9 @@ async function createTask() {
 async function onBatchCreated(_ids: string[], targetSubGroupId: string) {
   showBatchWizard.value = false
   // The batch endpoint created deliverables + stage-tasks server-side.
-  // Reload the board so the new sub-group, tasks, and deliverables appear.
-  await data.loadProjectBoard(projectId.value)
+  // Force-reload the board (past the freshness memo) so the new sub-group,
+  // tasks, and deliverables appear.
+  await data.loadProjectBoard(projectId.value, true)
   // A batch aimed at an EXISTING sub-group can sit outside the newest page,
   // in which case the reload above would file the user's brand new work
   // off-screen. Pull that one batch in regardless of where paging left it.
@@ -195,6 +196,13 @@ const client = computed(() => (project.value ? data.getClient(project.value.clie
 const subGroups = computed(() => data.subGroupsForProject(projectId.value))
 const tasks = computed(() => data.tasksForProject(projectId.value))
 
+// The board renders ONLY tasks whose sub-group is in the loaded window. The
+// store no longer prunes out-of-window docs on board load (the org-wide tasks
+// listener owns them for the flat surfaces), so without this filter the
+// kanban would mix tasks from batches the paging deliberately left out.
+const loadedSubGroupIds = computed(() => new Set(subGroups.value.map((s) => s.id)))
+const windowTasks = computed(() => tasks.value.filter((tk) => loadedSubGroupIds.value.has(tk.subGroupId)))
+
 // Sub-group focus. Once a project runs a batch per month, "everything at once"
 // stops being a useful default view of any of the three layouts — this narrows
 // all of them to one batch. '' = every loaded sub-group.
@@ -203,7 +211,7 @@ const visibleSubGroups = computed(() =>
   subGroupFilter.value ? subGroups.value.filter((s) => s.id === subGroupFilter.value) : subGroups.value,
 )
 const visibleTasks = computed(() =>
-  subGroupFilter.value ? tasks.value.filter((tk) => tk.subGroupId === subGroupFilter.value) : tasks.value,
+  subGroupFilter.value ? windowTasks.value.filter((tk) => tk.subGroupId === subGroupFilter.value) : windowTasks.value,
 )
 // A filtered-to sub-group can fall out of the loaded window on a reload.
 watch(subGroups, (list) => {
@@ -265,15 +273,11 @@ async function load(force = false) {
     project.value = p
     if (p) {
       view.value = p.defaultView
-      const { collection: col, getDocs: gd, query: q, where: w } = await import('firebase/firestore')
-      const { db: fireDb } = await import('../lib/firebase')
-      const { mapPackage } = await import('../lib/mappers')
       // The board load is paged: it pulls the newest sub-groups plus their
-      // tasks and deliverables. Earlier batches arrive via "load earlier".
-      await data.loadProjectBoard(projectId.value)
-      // Load packages for this project.
-      const pkgSnap = await gd(q(col(fireDb, 'packages'), w('orgId', '==', data.clients[0]?.orgId || ''), w('projectId', '==', projectId.value)))
-      projectPackages.value = pkgSnap.docs.map((d) => mapPackage(d.id, d.data()))
+      // tasks and deliverables (TTL-memoized per project; `force` re-reads).
+      // Earlier batches arrive via "load earlier".
+      await data.loadProjectBoard(projectId.value, force)
+      projectPackages.value = await data.loadPackagesForProject(projectId.value)
     }
     loaded.value = true
   } catch {

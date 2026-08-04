@@ -201,28 +201,40 @@ Otherwise the portal pays a subcollection read per row to show the current cut.
 
 ### 5. Fix the existing load patterns
 
-- ~~Memoize `loadAllProjects` / `loadAllTasks`~~ **Done**, but as a **TTL, not
-  a permanent flag.** Every full-collection load records when it ran and
-  re-reads past 5 minutes; each takes a `force` argument that the refresh
-  controls pass. The earlier `usersLoaded`/`clientsLoaded` booleans were
-  permanent for the life of the session, which traded stale data for saved
-  reads without telling anyone — that was the actual source of "why is this
-  not updating?".
-- `ClientDetailPage` and `TeamPage` should query their subset, not the whole
-  org's tasks. **Still open.**
-- Analytics and Ledger must stop computing over a 1,000-document page — move to
-  aggregation queries or precomputed rollups. **Still open**, and see the
-  correctness bug above: this is the one that makes those pages silently wrong
-  rather than merely slow.
+- ~~Memoize `loadAllProjects` / `loadAllTasks`~~ **Superseded by live
+  listeners.** The org-wide flat collections (members, clients, projects and
+  tasks first-window, invites, per-uid assigned tasks) are now `onSnapshot`
+  listeners in `app/src/stores/data.ts`: the first attach bills the same reads
+  as the old full fetch, after which only server-side *changes* are billed and
+  pushed. Paired with the persistent IndexedDB cache
+  (`app/src/lib/firebase.ts`), a reload resumes from the last sync token and
+  re-pays only the delta — so both the TTL staleness problem and the
+  reload-repays-everything problem are gone for these collections, and their
+  refresh buttons with them. The 5-minute TTL memo **remains for the scoped
+  pull loads** — board window (`board:{projectId}`), client-detail subset
+  (`clientProjects:`/`clientTasks:{clientId}`), ledger — whose refresh
+  controls pass `force`.
+- ~~`ClientDetailPage` and `TeamPage` should query their subset~~ **Done.**
+  ClientDetail pulls its client's projects/tasks (TTL + refresh); Team gets
+  per-member active counts from `count()` aggregations instead of loading
+  every org task to display ten numbers.
+- ~~Analytics and Ledger must stop computing over a 1,000-document page~~
+  **Done.** Every number on Analytics comes from `count()` aggregations
+  (status, per-client, per-assignee-active, project total). The Ledger has its
+  own query — `orgId` + `status in DONE_STATUSES` + `completedAt desc`, paged
+  at 200 with load-more — instead of filtering the org window.
 
-**A memo must be invalidated by anything that REMOVES documents it vouches
-for.** Board paging prunes a project's out-of-window tasks from the store, so
-`loadProjectBoard` explicitly drops the `tasks` memo. Without that, the Ledger,
-All Tasks and Analytics would hit a memo that still claimed freshness and
-render the pruned set with no indication anything was missing. For the same
+**Removal discipline, post-listeners.** A live listener must never have its
+window pruned behind its back — it only pushes *changes*, so locally deleted
+docs it still vouches for would stay gone until they next change. That is why
+`loadProjectBoard` no longer prunes a project's out-of-window tasks from the
+store: `loadChildrenOfSubGroups` reconciles exactly the sub-group windows it
+re-reads (dropping in-window docs the fresh read didn't return), the org-wide
+listener owns removals for its own window, and the board *renders* only tasks
+whose sub-group is loaded (`ProjectBoardPage`'s `windowTasks`). For the same
 reason, components must not keep **private** load flags: `OmniSearch` and
 `SlatePage` both had one, both outlived the pages that pruned the store, and
-both are now gone in favour of the store's memo.
+both are gone in favour of the store's listeners/memos.
 
 ### 6. Index exemptions
 
@@ -282,6 +294,19 @@ Added by board paging (all three are in `firestore.indexes.json`):
 - tasks by `orgId` + `subGroupId` — the `in` chunk. `in` is a disjunction of
   equality filters, so this is an ordinary two-equality composite.
 - deliverables by `orgId` + `subGroupId` — same query for the deliverables side.
+
+Added by the load-pattern fixes (all in `firestore.indexes.json`):
+
+- tasks by `orgId` + `status` + `completedAt` **descending** — the ledger's
+  completed-work query (`status in` + `orderBy` needs the composite).
+- tasks by `orgId` + `assigneeUid` + `status` — the per-member active-count
+  aggregation. `count()` has the same index requirements as the query it
+  counts.
+- tasks by `orgId` + `status` + `dueAt`, `orgId` + `assigneeUid` + `dueAt`,
+  and `orgId` + `assigneeUid` + `status` + `dueAt` — All Tasks' server-side
+  filter fallback. When the org outgrows the live window and a filter is
+  active, the page queries the filter combo directly (paged by `dueAt`)
+  instead of filtering an incomplete window client-side.
 
 **Priority needs no index.** Deliverable priority is sorted in memory on the
 board and in the portal, both of which already hold the full set they render.

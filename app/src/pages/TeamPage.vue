@@ -10,8 +10,8 @@ import { track } from '../lib/analytics'
 import { resendInviteApi } from '../lib/api'
 import { ROLES } from '../lib/types'
 import type { Invite, Role } from '../lib/types'
-import { isDoneStatus } from '../lib/status'
 import BaseButton from '../components/BaseButton.vue'
+import RefreshButton from '../components/RefreshButton.vue'
 import BaseInput from '../components/BaseInput.vue'
 import BaseSelect from '../components/BaseSelect.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -25,10 +25,14 @@ const auth = useAuthStore()
 const toast = useToastStore()
 const { canInvite } = useEntitlements()
 
+// Active-task counts come from count() aggregations rather than loading the
+// org's entire task collection to display ~10 numbers — exact at any
+// workspace size, ~1 read per member instead of one per task.
+const activeCounts = ref<Record<string, number>>({})
 const members = computed(() =>
   Object.values(data.usersById).map((u) => ({
     ...u,
-    active: data.tasks.filter((tk) => tk.assigneeUid === u.uid && !isDoneStatus(tk.status)).length,
+    active: activeCounts.value[u.uid] ?? 0,
   })),
 )
 
@@ -118,10 +122,12 @@ const loadError = ref(false)
 async function load() {
   loadError.value = false
   try {
-    // Clients feed the invite modal's client picker; invites feed the pending list.
-    // loadUsers(true): the roster changes outside this client (invite accepts),
-    // so bypass the memo — otherwise newly accepted members never appear.
-    await Promise.all([data.loadUsers(true), data.loadAllTasks(), data.loadClients(), data.loadInvites()])
+    // Clients feed the invite modal's client picker; invites feed the pending
+    // list. Roster + invites are live listeners (invite accepts made in other
+    // sessions stream in); the per-member counts are one-shot aggregations,
+    // which is what the refresh control re-fetches.
+    await Promise.all([data.loadUsers(), data.loadClients(), data.loadInvites()])
+    activeCounts.value = await data.fetchActiveTaskCounts(Object.keys(data.usersById))
   } catch {
     loadError.value = true
   }
@@ -136,7 +142,10 @@ onMounted(load)
         <h1 class="text-2xl font-bold tracking-tight" style="color: var(--text);">{{ t('team.title') }}</h1>
         <p class="mt-1 text-sm" style="color: var(--text-muted);">{{ t('team.subtitle') }}</p>
       </div>
-      <BaseButton @click="openInvite">{{ t('team.inviteMember') }}</BaseButton>
+      <div class="flex items-center gap-2">
+        <RefreshButton :on-refresh="load" />
+        <BaseButton @click="openInvite">{{ t('team.inviteMember') }}</BaseButton>
+      </div>
     </div>
 
     <div v-if="loadError" class="mt-8">

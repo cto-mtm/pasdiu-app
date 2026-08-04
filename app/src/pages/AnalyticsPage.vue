@@ -4,11 +4,13 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useDataStore } from '../stores/data'
 import { TASK_STATUSES } from '../lib/types'
-import { isDoneStatus, statusColor, statusKey } from '../lib/status'
+import type { TaskStatus } from '../lib/types'
+import { statusColor, statusKey } from '../lib/status'
 import BaseButton from '../components/BaseButton.vue'
 import DonutChart from '../components/DonutChart.vue'
 import BarChart from '../components/BarChart.vue'
 import InfoTip from '../components/InfoTip.vue'
+import RefreshButton from '../components/RefreshButton.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -19,17 +21,26 @@ function drillStatus(status: string) {
   router.push({ name: 'all-tasks', query: { status } })
 }
 
+// Every NUMBER on this page comes from server-side count() aggregations, not
+// from the windowed `tasks` array — the window holds only the first page of
+// the org's tasks, so computing over it silently under-reported once a
+// workspace outgrew it. Names/labels come from the live listeners.
+const statusCounts = ref<Record<TaskStatus, number> | null>(null)
+const clientCounts = ref<Record<string, number>>({})
+const activeCounts = ref<Record<string, number>>({})
+const projectCount = ref(0)
+
 const totals = computed(() => ({
   clients: data.clients.length,
-  projects: data.projects.length,
-  tasks: data.tasks.length,
+  projects: projectCount.value,
+  tasks: statusCounts.value ? Object.values(statusCounts.value).reduce((a, b) => a + b, 0) : 0,
 }))
 
 const statusSegments = computed(() =>
   TASK_STATUSES.map((s) => ({
     id: s,
     label: t(statusKey(s)),
-    value: data.tasks.filter((tk) => tk.status === s).length,
+    value: statusCounts.value?.[s] ?? 0,
     color: statusColor(s),
   })),
 )
@@ -38,7 +49,7 @@ const perClient = computed(() =>
   data.clients.map((c) => ({
     id: c.id,
     label: c.name,
-    value: data.tasks.filter((tk) => tk.clientId === c.id).length,
+    value: clientCounts.value[c.id] ?? 0,
   })),
 )
 
@@ -51,16 +62,27 @@ const workload = computed(() =>
   data.teamMembers
     .map((u) => ({
       label: u.displayName,
-      value: data.tasks.filter((tk) => tk.assigneeUid === u.uid && !isDoneStatus(tk.status)).length,
+      value: activeCounts.value[u.uid] ?? 0,
     }))
     .sort((a, b) => b.value - a.value),
 )
 
 const loadError = ref(false)
-async function load(force = false) {
+async function load() {
   loadError.value = false
   try {
-    await data.loadWorkspace(force)
+    // Listeners first — the count fetches below iterate the loaded rosters.
+    await Promise.all([data.loadUsers(), data.loadClients()])
+    const [byStatus, byClient, active, projects] = await Promise.all([
+      data.fetchTaskStatusCounts(),
+      data.fetchTaskCountsForClients(data.clients.map((c) => c.id)),
+      data.fetchActiveTaskCounts(data.teamMembers.map((u) => u.uid)),
+      data.fetchProjectCount(),
+    ])
+    statusCounts.value = byStatus
+    clientCounts.value = byClient
+    activeCounts.value = active
+    projectCount.value = projects
   } catch {
     loadError.value = true
   }
@@ -70,12 +92,18 @@ onMounted(load)
 
 <template>
   <section>
-    <h1 class="text-2xl font-bold tracking-tight" style="color: var(--text);">{{ t('analytics.title') }}</h1>
-    <p class="mt-1 text-sm" style="color: var(--text-muted);">{{ t('analytics.subtitle') }}</p>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight" style="color: var(--text);">{{ t('analytics.title') }}</h1>
+        <p class="mt-1 text-sm" style="color: var(--text-muted);">{{ t('analytics.subtitle') }}</p>
+      </div>
+      <!-- The counts are one-shot aggregations, not live — this re-fetches them. -->
+      <RefreshButton :on-refresh="load" />
+    </div>
 
     <div v-if="loadError" class="mt-8">
       <p class="text-sm" style="color: var(--text-muted);">{{ t('common.loadError') }}</p>
-      <BaseButton class="mt-3" @click="load(true)">{{ t('common.retry') }}</BaseButton>
+      <BaseButton class="mt-3" @click="load">{{ t('common.retry') }}</BaseButton>
     </div>
 
     <template v-else>

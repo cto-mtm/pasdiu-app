@@ -14,6 +14,7 @@ import MetaEditor from '../components/MetaEditor.vue'
 import StatusCounts from '../components/StatusCounts.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import InfoTip from '../components/InfoTip.vue'
+import RefreshButton from '../components/RefreshButton.vue'
 import type { MetaField, Project } from '../lib/types'
 
 const { t } = useI18n()
@@ -85,10 +86,17 @@ const viewLabelKey = (v: Project['defaultView']) => VIEW_LABEL_KEYS[v]
 
 const loadError = ref(false)
 const loaded = ref(false)
-async function load() {
+// The client's projects and tasks are TTL-memoized scoped pulls — revisits
+// within the freshness window cost nothing, and the refresh control passes
+// `force` for the "I know something changed" case.
+async function load(force = false) {
   loadError.value = false
   try {
-    await Promise.all([data.loadClients(), data.loadProjectsForClient(clientId.value), data.loadAllTasksForClient(clientId.value)])
+    await Promise.all([
+      data.loadClients(),
+      data.loadProjectsForClient(clientId.value, force),
+      data.loadAllTasksForClient(clientId.value, force),
+    ])
     loaded.value = true
   } catch {
     loadError.value = true
@@ -112,6 +120,7 @@ onMounted(load)
         {{ client.name }}
       </h1>
       <div class="flex items-center gap-2">
+        <RefreshButton :on-refresh="() => load(true)" />
         <button
           class="rounded-lg border px-3 py-2 text-sm"
           style="background: var(--surface-2); color: var(--text); border-color: var(--border);"

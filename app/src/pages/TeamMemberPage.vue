@@ -99,7 +99,16 @@ const loaded = ref(false)
 async function load() {
   loadError.value = false
   try {
-    await data.loadWorkspace()
+    // The per-uid assigned listener streams this member's FULL task history —
+    // the org-wide window only holds the first page of tasks by document id,
+    // so it could silently miss part of their work. Users/clients/projects
+    // listeners feed the name lookups on the rows.
+    await Promise.all([
+      data.loadUsers(),
+      data.loadClients(),
+      data.loadAllProjects(),
+      data.loadAssignedTasks(uid.value),
+    ])
     loaded.value = true
   } catch {
     loadError.value = true

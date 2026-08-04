@@ -16,6 +16,7 @@ node_modules/
 
 # Build output
 dist/
+*.tsbuildinfo
 
 # Env — commit only the example
 .env
