@@ -125,4 +125,32 @@ describe("GET /orgs/my-invites", () => {
     expect(res.body.invites).toHaveLength(2);
     expect(res.body.invites.map((i: { orgId: string }) => i.orgId).sort()).toEqual(["org-a", "org-b"]);
   });
+
+  // An invite stays 'pending' until someone acts on it, so joining by another
+  // route leaves the original behind. The app shell renders this list beside
+  // the workspace switcher, where such a row reads as an offer to join the
+  // workspace the user is already looking at.
+  it("omits invites to a workspace the caller already belongs to", async () => {
+    await seedInvitingOrg("org-mi-member", "inv-member", "mi-member@test.dev");
+    await seedMember("org-mi-member", "u-mi-member", "contractor");
+    const token = await makeUserToken({ uid: "u-mi-member", email: "mi-member@test.dev" });
+
+    const res = await get("/orgs/my-invites", token);
+
+    expect(res.status).toBe(200);
+    expect(res.body.invites).toEqual([]);
+  });
+
+  it("keeps invites from OTHER workspaces when the caller belongs to one", async () => {
+    await seedInvitingOrg("org-mi-in", "inv-in", "mi-mixed@test.dev");
+    await seedMember("org-mi-in", "u-mi-mixed", "contractor");
+    await seedInvitingOrg("org-mi-out", "inv-out", "mi-mixed@test.dev");
+    const token = await makeUserToken({ uid: "u-mi-mixed", email: "mi-mixed@test.dev" });
+
+    const res = await get("/orgs/my-invites", token);
+
+    expect(res.status).toBe(200);
+    expect(res.body.invites).toHaveLength(1);
+    expect(res.body.invites[0].orgId).toBe("org-mi-out");
+  });
 });

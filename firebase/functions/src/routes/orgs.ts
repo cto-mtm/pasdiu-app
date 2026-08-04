@@ -82,15 +82,11 @@ orgsRouter.get(
       .where("status", "==", "pending")
       .get();
 
-    // Two passes. The first reads nothing: it filters the expired rows out and
-    // collects which org / inviter docs are still needed. The second fetches
-    // those in one batched read each. Resolving inline instead would be a
-    // sequential round-trip per invite, and this list is rendered on the
-    // sign-in path.
+    // Collected in one pass that reads nothing, then resolved in batched reads
+    // below. Resolving inline instead would be a sequential round-trip per
+    // invite, and this list is fetched on the sign-in path.
     type Row = { orgId: string; inviteId: string; orgName: string; role: string; invitedBy: string };
-    const rows: Row[] = [];
-    const orgIdsToResolve = new Set<string>();
-    const inviterRefs = new Map<string, string>(); // "orgId/uid" -> uid
+    let rows: Row[] = [];
 
     for (const doc of snaps.docs) {
       // Path: orgs/{orgId}/invites/{inviteId}
@@ -99,20 +95,42 @@ orgsRouter.get(
       const data = doc.data();
       if (inviteExpired(data)) continue;
 
-      // Prefer the denormalized org name; the rest need the org doc.
-      const orgName = typeof data.orgName === "string" ? data.orgName : "";
-      if (!orgName) orgIdsToResolve.add(orgId);
-
-      const invitedBy = typeof data.invitedBy === "string" ? data.invitedBy : "";
-      if (invitedBy) inviterRefs.set(`${orgId}/${invitedBy}`, invitedBy);
-
       rows.push({
         orgId,
         inviteId: doc.id,
-        orgName,
+        // Prefer the denormalized org name; the rest need the org doc.
+        orgName: typeof data.orgName === "string" ? data.orgName : "",
         role: typeof data.role === "string" ? data.role : "",
-        invitedBy,
+        invitedBy: typeof data.invitedBy === "string" ? data.invitedBy : "",
       });
+    }
+
+    // Drop invitations to workspaces the caller is ALREADY in. An invite stays
+    // 'pending' until someone acts on it, so joining by another route (a second
+    // invite, a direct link) leaves the original behind — and the shell would
+    // then offer to "join" a workspace the user is looking at. Accepting one is
+    // harmless (accept short-circuits on an existing member doc), but it is a
+    // confusing row that persists until the invite expires.
+    //
+    // Done BEFORE the name lookups so dropped rows cost nothing to resolve.
+    // Results are keyed off each snapshot's own path (member docs are all named
+    // {uid}, so the ORG is the distinguishing part) rather than by position in
+    // the getAll response — nothing here should depend on that ordering.
+    if (rows.length > 0) {
+      const orgIds = [...new Set(rows.map((r) => r.orgId))];
+      const memberSnaps = await db.getAll(
+        ...orgIds.map((id) => db.doc(`orgs/${id}/members/${user.uid}`))
+      );
+      const alreadyMember = new Set(
+        memberSnaps.filter((s) => s.exists).map((s) => s.ref.parent.parent?.id)
+      );
+      rows = rows.filter((r) => !alreadyMember.has(r.orgId));
+    }
+
+    const orgIdsToResolve = new Set(rows.filter((r) => !r.orgName).map((r) => r.orgId));
+    const inviterRefs = new Map<string, string>(); // "orgId/uid" -> uid
+    for (const r of rows) {
+      if (r.invitedBy) inviterRefs.set(`${r.orgId}/${r.invitedBy}`, r.invitedBy);
     }
 
     const orgNames = new Map<string, string>();
@@ -129,12 +147,16 @@ orgsRouter.get(
     // workspace alone rather than rendering a blank name.
     const inviterNames = new Map<string, string>();
     if (inviterRefs.size > 0) {
-      const keys = [...inviterRefs.keys()];
-      const memberSnaps = await db.getAll(...keys.map((k) => db.doc(`orgs/${k.split("/")[0]}/members/${k.split("/")[1]}`)));
-      keys.forEach((key, i) => {
-        const name = memberSnaps[i]?.get("displayName");
-        if (typeof name === "string" && name) inviterNames.set(key, name);
-      });
+      const memberSnaps = await db.getAll(
+        ...[...inviterRefs.keys()].map((k) => db.doc(`orgs/${k.split("/")[0]}/members/${k.split("/")[1]}`))
+      );
+      for (const snap of memberSnaps) {
+        const name = snap.get("displayName");
+        // Same "orgId/uid" key the rows are looked up by, rebuilt from the doc.
+        if (typeof name === "string" && name) {
+          inviterNames.set(`${snap.ref.parent.parent?.id}/${snap.id}`, name);
+        }
+      }
     }
 
     const invites = rows.map((row) => ({
