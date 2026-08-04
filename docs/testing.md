@@ -113,6 +113,19 @@ Deny paths get tests, not just happy paths — that's where the risk lives.
 - **Scheduled jobs never fire in the emulator** — keep their logic in plain
   exported functions (`reconcileOrg`) and test those directly
   (see `test/reconcile.test.ts`).
+- **Firestore *triggers* DO fire — run this suite firestore-only.** The
+  one-shot commands above pass `--only firestore` deliberately. With the full
+  emulator suite up (`npm run emulators`, i.e. what you have while developing)
+  the functions emulator registers `onInviteCreated`, so `seedInvite()` writes
+  a document that trigger is watching — and it queues
+  `mail/invite-{orgId}-{inviteId}` behind the test's back. That is the same doc
+  `test/mail.test.ts` drives `sendInviteEmailFor` to write directly, so its
+  "must NOT queue" assertion (the deployed-prod-without-`APP_URL` case) races
+  the trigger and fails intermittently. Note that no email delivery is involved
+  either way: these tests only ever assert on the queued `mail/` doc's shape,
+  which is the whole firestore-send-email contract that is testable offline.
+  Any future test asserting a document does NOT exist is exposed the same way
+  when a trigger writes it.
 - **`req.rawBody`** is provided by the firebase-functions runtime, not by
   Express. The test harness in `helpers.ts` reproduces it (buffer raw bytes,
   pre-parse JSON, mark the body consumed) so Stripe signature verification
