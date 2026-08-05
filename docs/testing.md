@@ -9,19 +9,14 @@ What they guard: direct client access to Firestore (`firebase/firestore.rules`)
 — tenancy scoping, role gates, entitlement gates, immutable fields.
 
 - Location: `firebase/rules-test/` (`node --test` + `@firebase/rules-unit-testing`)
+- Dependencies: declared in `firebase/package.json` (`firebase/` is a root
+  workspace), so a plain `npm install` at the repo root provides them.
 - Run (one-shot, boots its own emulator):
 
 ```bash
 cd firebase
 firebase emulators:exec --only firestore --project demo-app "npm test"
 ```
-
-> **Currently broken:** `@firebase/rules-unit-testing` is not declared as a
-> dependency anywhere — `firebase/package.json` has no dependency block and
-> `firebase/` is not one of the root workspaces — so the command above fails
-> with `ERR_MODULE_NOT_FOUND` before any test runs. Rules tests written since
-> this broke have never executed. Fix the dependency before trusting a green
-> run here, and delete this note when you do.
 
 ## Layer 2 — Cloud Functions API integration tests
 

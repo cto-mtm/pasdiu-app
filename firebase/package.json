@@ -8,5 +8,9 @@
     "seed": "npm --prefix functions run seed",
     "test": "node --test rules-test/firestore.rules.test.mjs",
     "test:integration": "firebase emulators:exec --only firestore,auth --project demo-app \"npm --prefix functions test\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.0",
+    "firebase": "^12.9.0"
   }
 }
