@@ -1,8 +1,8 @@
 // Firestore security-rules tests (the documented approach — @firebase/rules-unit-testing
-// against the emulator). Run with the emulator up:
+// against the emulator). Dependencies are declared in firebase/package.json and
+// installed by `npm install` at the repo root (firebase/ is a workspace). Run:
 //
 //   cd firebase
-//   npm i -D @firebase/rules-unit-testing firebase
 //   firebase emulators:exec --only firestore --project demo-app "npm test"
 //
 // Docs: https://firebase.google.com/docs/firestore/security/test-rules-emulator
