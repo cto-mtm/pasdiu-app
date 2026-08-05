@@ -3,9 +3,11 @@
 // Read-only in v1: click through to task, deliverable, or session. No drag.
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { addDoc, collection, getDocs, query, where, Timestamp } from 'firebase/firestore'
+import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useAuthStore } from '../stores/auth'
+import { useDataStore } from '../stores/data'
+import { useBusy } from '../composables/useBusy'
 import { mapRecordingSession, mapTask } from '../lib/mappers'
 import type { RecordingSession, Task } from '../lib/types'
 import BaseButton from '../components/BaseButton.vue'
@@ -15,6 +17,8 @@ import ModalFooter from '../components/ModalFooter.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const data = useDataStore()
+const { busy, run } = useBusy()
 
 const currentMonth = ref(new Date())
 const sessions = ref<RecordingSession[]>([])
@@ -84,27 +88,20 @@ const sessNotes = ref('')
 
 async function createSession() {
   if (!sessName.value.trim() || !sessDate.value) return
-  const orgId = auth.activeOrgId
-  if (!orgId) return
-  await addDoc(collection(db, 'sessions'), {
-    orgId,
-    clientId: '',
-    projectId: '',
-    name: sessName.value.trim(),
-    location: sessLocation.value.trim(),
-    date: Timestamp.fromDate(new Date(sessDate.value)),
-    startsAt: null,
-    endsAt: null,
-    taskIds: [],
-    notes: sessNotes.value.trim(),
-    createdAt: Timestamp.now(),
+  await run(async () => {
+    await data.createRecordingSession({
+      name: sessName.value.trim(),
+      location: sessLocation.value.trim(),
+      date: new Date(sessDate.value),
+      notes: sessNotes.value.trim(),
+    })
+    showNewSession.value = false
+    sessName.value = ''
+    sessLocation.value = ''
+    sessDate.value = ''
+    sessNotes.value = ''
+    await loadMonth()
   })
-  showNewSession.value = false
-  sessName.value = ''
-  sessLocation.value = ''
-  sessDate.value = ''
-  sessNotes.value = ''
-  await loadMonth()
 }
 
 async function loadMonth() {
@@ -241,7 +238,7 @@ onMounted(loadMonth)
             style="background: var(--surface-2); color: var(--text); border-color: var(--border);"
           />
         </label>
-        <ModalFooter label="Create" :busy="false" @cancel="showNewSession = false" @submit="createSession" />
+        <ModalFooter :label="t('actions.create')" :busy="busy" @cancel="showNewSession = false" @submit="createSession" />
       </form>
     </Modal>
   </section>
