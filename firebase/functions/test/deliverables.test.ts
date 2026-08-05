@@ -173,10 +173,29 @@ describe("POST /orgs/:orgId/deliverables/batch", () => {
     // Stage snapshot present.
     const stages = del0.get("stages") as unknown[];
     assert.equal(stages.length, 3);
+    // Latest-cut projection starts empty (the onVersionWrite trigger owns it).
+    assert.equal(del0.get("latestVersionUrl"), "");
+    assert.equal(del0.get("latestVersionLabel"), "");
 
     // Tasks created (3 stages × 3 deliverables = 9).
     const taskSnap = await db.collection("tasks").where("orgId", "==", ORG).get();
     assert.equal(taskSnap.size, 9);
+
+    // Stage summary is prefilled at creation — complete before any trigger
+    // runs (and byte-identical to what onTaskWrite rebuilds), so the portal
+    // renders progress immediately. Each entry points at its real stage task.
+    const summary = del0.get("stageSummary") as Array<Record<string, unknown>>;
+    assert.deepEqual(summary.map((e) => e.stageId), ["s_capture", "s_edit", "s_review"]);
+    const taskById = new Map(taskSnap.docs.map((d) => [d.id, d]));
+    for (const entry of summary) {
+      assert.equal(entry.status, "backlog");
+      assert.equal(entry.clientVisible, false);
+      const task = taskById.get(entry.taskId as string);
+      assert.ok(task, `summary entry ${entry.stageId} must reference a real task`);
+      assert.equal(task.get("stageId"), entry.stageId);
+      assert.equal(task.get("deliverableId"), del0.id);
+      assert.equal(task.get("assigneeUid"), entry.assigneeUid);
+    }
 
     // Check round-robin assignment on "Edit" stage.
     // Sort by `order`: the query has no orderBy, so Firestore returns docs by
@@ -298,6 +317,12 @@ describe("POST /orgs/:orgId/deliverables/batch", () => {
     assert.ok(stageIds.includes("s_capture"));
     assert.ok(stageIds.includes("s_edit"));
     assert.ok(!stageIds.includes("s_review"));
+
+    // The skipped stage gets NO summary entry — a backlog placeholder would
+    // read as the current stage forever (see rebuildStageSummary).
+    const delSnap = await db.doc(`deliverables/${res.body.deliverableIds[0]}`).get();
+    const summary = delSnap.get("stageSummary") as Array<Record<string, unknown>>;
+    assert.deepEqual(summary.map((e) => e.stageId), ["s_capture", "s_edit"]);
   });
 
   // ── Stage scheduling ──────────────────────────────────────────────────────

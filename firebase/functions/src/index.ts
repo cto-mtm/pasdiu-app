@@ -13,3 +13,4 @@ export { api } from "./api.js";
 export { reconcileUsage } from "./triggers/reconcileUsage.js";
 export { onInviteCreated } from "./triggers/onInviteCreated.js";
 export { onTaskWrite } from "./triggers/onTaskWrite.js";
+export { onVersionWrite } from "./triggers/onVersionWrite.js";

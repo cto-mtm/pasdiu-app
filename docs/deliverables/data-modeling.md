@@ -142,12 +142,23 @@ export interface StageSummaryEntry {
   assigneeUid: string
   assigneeName: string   // denormalized; renames fan out (rare, manager-only)
   dueAt: Date | null
+  taskId: string         // '' when the stage's task doesn't exist yet
+  clientVisible: boolean // mirrors the task; the portal links chips by it
 }
 ```
 
-Maintained by an `onWrite` trigger on tasks. Carry **enough that a board row
+Maintained by an `onWrite` trigger on tasks (rebuild logic in
+`firebase/functions/src/helpers/deliverableProjections.ts`; the batch endpoint
+prefills the identical shape at creation). Carry **enough that a board row
 never needs a second read** — including assignee display names, which saves a
-member lookup per row.
+member lookup per row, and `taskId`/`clientVisible`, which let the portal's
+stage chips link into the Iteration Room without a per-deliverable task query.
+
+One derivation subtlety, mirrored from `currentStage()` in
+`app/src/lib/deliverableStage.ts`: an **optional stage with no task** was
+skipped at creation and gets **no entry** (a backlog placeholder would render
+as the current stage forever); a required stage with no task gets a
+placeholder with `taskId: ''`.
 
 **This revises the phase 1 "derive, never store" decision.** The original
 constraint stands: contractors and clients cannot write stage position. A
@@ -198,6 +209,12 @@ sub-groups created concurrently landing on the same `order`) are safe:
 ### 4. Denormalize `latestVersion` onto the deliverable
 
 Otherwise the portal pays a subcollection read per row to show the current cut.
+
+**Shipped as `latestVersionUrl` + `latestVersionLabel`, maintained by the
+`onVersionWrite` trigger** on `deliverables/{id}/versions/{vid}` (newest by
+`createdAt`; no versions clears both). Versions are added from the Iteration
+Room via the client SDK, which cannot write the deliverable doc — the trigger
+is what keeps the portal's "Watch the latest cut" button current.
 
 ### 5. Fix the existing load patterns
 

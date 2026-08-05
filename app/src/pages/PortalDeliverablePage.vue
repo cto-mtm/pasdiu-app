@@ -10,22 +10,23 @@
 // is rule-safe for clients:
 //  - the deliverable doc itself (clientId + clientVisible gated get)
 //  - stageSummary on the doc — stage states with ZERO task reads (this is
-//    exactly what the trigger-maintained projection exists for)
+//    exactly what the trigger-maintained projection exists for; its
+//    taskId/clientVisible fields are also what links stage chips into the
+//    Iteration Room without a task query)
 //  - versions/notes subcollections (hasDeliverableAccess)
-//  - client-visible tasks only, queried with the filters the rules demand
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useAuthStore } from '../stores/auth'
 import { useDataStore } from '../stores/data'
 import { useToastStore } from '../stores/toast'
 import { useBusy } from '../composables/useBusy'
 import { apiFetch } from '../lib/api'
-import { mapDeliverable, mapNote, mapTask, mapVersion } from '../lib/mappers'
+import { mapDeliverable, mapNote, mapVersion } from '../lib/mappers'
 import { isDoneStatus, statusColor } from '../lib/status'
-import type { Deliverable, Note, Task, Version } from '../lib/types'
+import type { Deliverable, Note, Version } from '../lib/types'
 import BaseButton from '../components/BaseButton.vue'
 import PriorityBadge from '../components/PriorityBadge.vue'
 import Modal from '../components/Modal.vue'
@@ -42,7 +43,6 @@ const deliverableId = computed(() => String(route.params.deliverableId))
 const deliverable = ref<Deliverable | null>(null)
 const versions = ref<Version[]>([])
 const notes = ref<Note[]>([])
-const visibleTasks = ref<Task[]>([])
 const loadError = ref(false)
 const loaded = ref(false)
 
@@ -72,18 +72,9 @@ async function load() {
     // member, clients included).
     await data.loadUsers()
 
-    const [vSnap, nSnap, taskSnap] = await Promise.all([
+    const [vSnap, nSnap] = await Promise.all([
       getDocs(collection(db, 'deliverables', deliverableId.value, 'versions')),
       getDocs(collection(db, 'deliverables', deliverableId.value, 'notes')),
-      // Only the tasks shared with this client — the clientId + clientVisible
-      // filters are what make this query legal under the rules.
-      getDocs(query(
-        collection(db, 'tasks'),
-        where('orgId', '==', orgId),
-        where('clientId', '==', cid),
-        where('clientVisible', '==', true),
-        where('deliverableId', '==', deliverableId.value),
-      )),
     ])
     versions.value = vSnap.docs
       .map((x) => mapVersion(x.id, x.data()))
@@ -91,7 +82,6 @@ async function load() {
     notes.value = nSnap.docs
       .map((x) => mapNote(x.id, x.data()))
       .sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0))
-    visibleTasks.value = taskSnap.docs.map((x) => mapTask(x.id, x.data()))
     loaded.value = true
   } catch {
     loadError.value = true
@@ -106,13 +96,10 @@ const stages = computed(() => deliverable.value?.stageSummary ?? [])
 const currentIndex = computed(() => stages.value.findIndex((s) => !isDoneStatus(s.status)))
 const complete = computed(() => stages.value.length > 0 && currentIndex.value === -1)
 
-// Shared-task lookup so a stage chip can link into the Iteration Room when
-// its task is client-visible (the task route admits clients).
-const taskByStage = computed(() => {
-  const map = new Map<string, Task>()
-  for (const tk of visibleTasks.value) if (tk.stageId) map.set(tk.stageId, tk)
-  return map
-})
+// A stage chip links into the Iteration Room when its task is shared with the
+// client (the task route admits clients). The summary carries the task's id
+// and visibility, so no task query is needed.
+const linkedTaskId = (s: (typeof stages.value)[number]) => (s.clientVisible ? s.taskId : '')
 
 // ── Feedback thread ─────────────────────────────────────────────
 const noteBody = ref('')
@@ -191,6 +178,8 @@ async function submitRequestChanges() {
       style="background: var(--accent-cyan); color: var(--bg);"
     >
       ▶ {{ t('portal.latestCut') }}
+      <!-- Version labels (v1, v2, …) are data, not copy — no i18n key. -->
+      <span v-if="deliverable.latestVersionLabel" class="opacity-80">{{ deliverable.latestVersionLabel }}</span>
     </a>
 
     <!-- Stage progress (from stageSummary — no task reads) -->
@@ -199,12 +188,12 @@ async function submitRequestChanges() {
       <p v-if="complete" class="mt-1 text-sm" style="color: var(--accent-emerald);">{{ t('portal.allStagesDone') }}</p>
       <div class="mt-2 flex flex-wrap gap-2">
         <component
-          :is="taskByStage.get(stage.stageId) ? 'RouterLink' : 'span'"
+          :is="linkedTaskId(stage) ? 'RouterLink' : 'span'"
           v-for="(stage, i) in stages"
           :key="stage.stageId"
-          v-bind="taskByStage.get(stage.stageId) ? { to: { name: 'task', params: { taskId: taskByStage.get(stage.stageId)!.id } } } : {}"
+          v-bind="linkedTaskId(stage) ? { to: { name: 'task', params: { taskId: linkedTaskId(stage) } } } : {}"
           class="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm"
-          :class="{ 'cursor-pointer transition-colors hover:brightness-110': taskByStage.get(stage.stageId) }"
+          :class="{ 'cursor-pointer transition-colors hover:brightness-110': linkedTaskId(stage) }"
           :style="{
             background: i === currentIndex ? 'var(--accent-cyan)' : 'var(--surface-2)',
             color: i === currentIndex ? 'var(--bg)' : 'var(--text)',

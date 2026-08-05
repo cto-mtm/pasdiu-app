@@ -244,6 +244,8 @@ export interface StageSummaryEntry {
   assigneeUid: string
   assigneeName: string
   dueAt: Date | null
+  taskId: string // '' when the stage's task doesn't exist yet
+  clientVisible: boolean // mirrors the task; lets the portal link chips without a task query
 }
 
 export type ApprovalVia = 'portal' | 'in_person' | 'external'
@@ -297,6 +299,7 @@ export interface Deliverable {
   priority: DeliverablePriority
   clientVisible: boolean
   latestVersionUrl: string
+  latestVersionLabel: string
   order: number
   meta: MetaField[]
   createdAt: Date | null

@@ -63,6 +63,7 @@ export interface Deliverable {
   status: DeliverableStatus
   clientVisible: boolean    // gates the whole deliverable in the client portal
   latestVersionUrl: string  // denormalized so portal rows need no extra read
+  latestVersionLabel: string // "v3" — stamped with the url by onVersionWrite
   order: number
   meta: MetaField[]
   createdAt: Date | null
@@ -77,6 +78,8 @@ export interface StageSummaryEntry {
   assigneeUid: string
   assigneeName: string      // denormalized; renames fan out (rare, manager-only)
   dueAt: Date | null
+  taskId: string            // '' when the stage's task doesn't exist yet
+  clientVisible: boolean    // mirrors the task; portal links chips by it
 }
 ```
 

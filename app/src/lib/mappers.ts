@@ -191,7 +191,21 @@ export function mapDeliverable(id: string, d: Record<string, unknown>): Delivera
     subGroupName: (d.subGroupName as string) ?? '',
     typeId: (d.typeId as string) ?? '',
     stages: (d.stages as WorkflowStage[]) ?? [],
-    stageSummary: (d.stageSummary as StageSummaryEntry[]) ?? [],
+    // Per-entry normalization: summaries written before taskId/clientVisible
+    // existed keep working (the portal just renders unlinked chips until the
+    // trigger next heals them), and Timestamp dueAt converts like every date.
+    stageSummary: ((d.stageSummary as Array<Record<string, unknown>>) ?? []).map(
+      (s): StageSummaryEntry => ({
+        stageId: s.stageId as string,
+        name: s.name as string,
+        status: s.status as TaskStatus,
+        assigneeUid: (s.assigneeUid as string) ?? '',
+        assigneeName: (s.assigneeName as string) ?? '',
+        dueAt: toDate(s.dueAt),
+        taskId: (s.taskId as string) ?? '',
+        clientVisible: (s.clientVisible as boolean) ?? false,
+      })
+    ),
     name: d.name as string,
     status: (d.status as DeliverableStatus) ?? 'active',
     // Deliverables created before priority existed carry no field — they are
@@ -199,6 +213,7 @@ export function mapDeliverable(id: string, d: Record<string, unknown>): Delivera
     priority: (d.priority as DeliverablePriority) ?? 'normal',
     clientVisible: (d.clientVisible as boolean) ?? false,
     latestVersionUrl: (d.latestVersionUrl as string) ?? '',
+    latestVersionLabel: (d.latestVersionLabel as string) ?? '',
     order: (d.order as number) ?? 0,
     meta: (d.meta as MetaField[]) ?? [],
     createdAt: toDate(d.createdAt),
