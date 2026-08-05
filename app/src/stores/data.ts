@@ -35,7 +35,7 @@ import { mapClient, mapDeliverable, mapInvite, mapMember, mapNote, mapPackage, m
 import { DONE_STATUSES, isDoneStatus } from '../lib/status'
 import { priorityRank, TASK_STATUSES, WorkflowPipelineSchema } from '../lib/types'
 import type {
-  Client, Deliverable, Invite, Package, Project, Role, SubGroup, Task, TaskStatus, Version, Note, UserProfile, MetaField,
+  Client, Deliverable, Invite, Package, Project, RecordingSession, Role, SubGroup, Task, TaskStatus, Version, Note, UserProfile, MetaField,
   WorkflowStage,
 } from '../lib/types'
 
@@ -792,6 +792,34 @@ export const useDataStore = defineStore('data', () => {
     return p
   }
 
+  // Quick-create from the calendar: a bare shoot booking, not yet linked to a
+  // client/project or capture tasks. Returned to the caller (not held in the
+  // store) — Calendar/Schedule keep their own month/week windows and re-query
+  // after a create. Doc shape mirrors mapRecordingSession (lib/mappers.ts).
+  async function createRecordingSession(input: {
+    name: string; location: string; date: Date; notes: string
+  }): Promise<RecordingSession> {
+    const orgId = requireOrgId()
+    const ref = await guarded(() => addDoc(collection(db, 'sessions'), {
+      orgId,
+      clientId: '',
+      projectId: '',
+      name: input.name,
+      location: input.location,
+      date: Timestamp.fromDate(input.date),
+      startsAt: null,
+      endsAt: null,
+      taskIds: [],
+      notes: input.notes,
+      createdAt: serverTimestamp(),
+    }))
+    return {
+      id: ref.id, orgId, clientId: '', projectId: '',
+      name: input.name, location: input.location, date: input.date,
+      startsAt: null, endsAt: null, taskIds: [], notes: input.notes, createdAt: new Date(),
+    }
+  }
+
   // ── Updates (managers only; rules enforce) ────────────────────
   async function updateClient(id: string, patch: Partial<Pick<Client, 'name' | 'meta'>>): Promise<void> {
     await guarded(() => updateDoc(doc(db, 'clients', id), patch))
@@ -1202,7 +1230,7 @@ export const useDataStore = defineStore('data', () => {
     loadAssignedTasks, tasksForAssignee,
     loadAllTasks, loadMoreTasks, loadTasksForClient, loadAllTasksForClient,
     loadInvites, createInvite, revokeInvite,
-    createClient, createProject, createSubGroup, createTask,
+    createClient, createProject, createSubGroup, createTask, createRecordingSession,
     updateClient, updateProject, updateMember, updateOrgPipeline, updateSubGroup, updateTask,
     updateTaskStatus, setProjectTasksVisibility,
     deleteTask, deleteSubGroup, deleteProject, deleteClient,
