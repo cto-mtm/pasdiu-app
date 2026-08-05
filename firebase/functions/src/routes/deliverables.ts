@@ -152,7 +152,7 @@ deliverablesRouter.post(
 
       // One deadline per stage, chained off this deliverable's own anchor.
       const stageDue = stageDueDates(stages, anchorDates[i], input.scheduleMode);
-      const dueByStageId = new Map(stages.map((s, si) => [s.id, stageDue[si]]));
+      const dueByStageId = new Map(stages.map((s, si): [string, Date | null] => [s.id, stageDue[si]]));
 
       // Round-robin assignee for a stage of deliverable i — shared by the
       // summary prefill and the task docs so the two can't drift.
