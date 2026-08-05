@@ -10,6 +10,8 @@
     "build": "node esbuild.mjs",
     "build:watch": "node esbuild.mjs --watch",
     "seed": "node seed.mjs",
+    "grant-plan": "node grant-plan.mjs",
+    "grant-plan:prod": "node grant-plan-prod.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "npm run typecheck && vitest run",
     "test:watch": "vitest",
