@@ -8,6 +8,7 @@ import { billingRouter, billingWebhookHandler } from "./routes/billing.js";
 import { orgsRouter } from "./routes/orgs.js";
 import { deliverablesRouter } from "./routes/deliverables.js";
 import { approvalRouter } from "./routes/approval.js";
+import { calendarRouter } from "./routes/calendar.js";
 
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
@@ -27,6 +28,8 @@ const VALID_ROUTES = [
   "POST /orgs/:orgId/deliverables/:deliverableId/approve",
   "POST /orgs/:orgId/deliverables/:deliverableId/request-changes",
   "POST /orgs/:orgId/deliverables/bulk-approve",
+  "POST /orgs/:orgId/calendar-feed",
+  "GET /calendar/:token",
   "GET /billing/config",
   "POST /billing/checkout",
   "POST /billing/portal",
@@ -57,6 +60,9 @@ app.use("/billing", billingRouter);
 app.use("/orgs", orgsRouter);
 app.use("/orgs", deliverablesRouter);
 app.use("/orgs", approvalRouter);
+// Mounted at root: it carries both the authed /orgs/:orgId/calendar-feed
+// creator and the public token-authed /calendar/:token feed.
+app.use(calendarRouter);
 
 // ── 404 ─────────────────────────────────────────────────────────────────────
 app.use((req, res) => {

@@ -160,3 +160,17 @@ export function createPortalApi(orgId: string): Promise<ApiResult<{ url: string 
     body: JSON.stringify({ orgId }),
   })
 }
+
+// ── Calendar feed (outward ICS sync) ────────────────────────────
+// Get-or-create the caller's feed token for an org (idempotent — the same
+// token comes back on every call, so "get my link" is safe to repeat).
+export function createCalendarFeedApi(orgId: string): Promise<ApiResult<{ token: string }>> {
+  return apiFetch<{ token: string }>(`/orgs/${orgId}/calendar-feed`, { method: 'POST' })
+}
+
+// The subscription URL Google/Apple/Outlook poll. Built client-side from the
+// API base so dev points at the emulator and prod at the deployed function;
+// the token IS the credential — treat the URL as a secret.
+export function calendarFeedUrl(token: string): string {
+  return `${BASE_URL}/calendar/${token}.ics`
+}
