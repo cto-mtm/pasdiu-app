@@ -80,6 +80,11 @@ export const useAuthStore = defineStore('auth', () => {
   const usage = ref<OrgUsage | null>(null)
   const error = ref<string | null>(null)
 
+  // Full-page loader flag: true from the moment a login succeeds until the
+  // landing page has loaded its initial data. Prevents the flash of an empty
+  // app shell between login and first paint.
+  const transitioning = ref(false)
+
   // Pending invites addressed to this account's email (checked at login).
   // Consumed by the welcome/onboarding page and by any in-app banner.
   const pendingInvites = ref<PendingInvite[]>([])
@@ -409,7 +414,10 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const cred = await signInWithEmailAndPassword(auth, email, password)
       const ok = await completeSignIn(cred.user)
-      if (ok) track('login', { method: 'password' })
+      if (ok) {
+        transitioning.value = true
+        track('login', { method: 'password' })
+      }
       return ok
     } catch (e) {
       error.value = friendlyAuthError(e)
@@ -422,7 +430,10 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const cred = await signInWithPopup(auth, new GoogleAuthProvider())
       const ok = await completeSignIn(cred.user)
-      if (ok) track('login', { method: 'google' })
+      if (ok) {
+        transitioning.value = true
+        track('login', { method: 'google' })
+      }
       return ok
     } catch (e) {
       if (
@@ -554,6 +565,7 @@ export const useAuthStore = defineStore('auth', () => {
     profile,
     error,
     ready,
+    transitioning,
     isAuthed,
     role,
     isManager,

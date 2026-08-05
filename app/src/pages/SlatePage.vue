@@ -64,6 +64,7 @@ async function load(force = false) {
   } catch {
     loadFailed.value = true
   }
+  auth.transitioning = false
 }
 onMounted(load)
 

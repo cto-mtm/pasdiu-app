@@ -100,7 +100,10 @@ async function load() {
   loadFailed.value = false
   const cid = auth.clientId
   const orgId = auth.activeOrgId
-  if (!cid || !orgId) return
+  if (!cid || !orgId) {
+    auth.transitioning = false
+    return
+  }
   try {
     // Client-scoped deliverable query (must filter clientId + clientVisible per rules).
     const snap = await getDocs(query(
@@ -113,6 +116,7 @@ async function load() {
   } catch {
     loadFailed.value = true
   }
+  auth.transitioning = false
 }
 onMounted(load)
 </script>

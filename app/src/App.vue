@@ -5,6 +5,7 @@ import { useAuthStore } from './stores/auth'
 import { PLAN_FEATURES, type PlanFeature } from './lib/plans'
 import type { Role } from './lib/types'
 import AppShell from './components/AppShell.vue'
+import FullPageLoader from './components/FullPageLoader.vue'
 import OnboardingTour from './components/OnboardingTour.vue'
 import Toaster from './components/Toaster.vue'
 
@@ -16,6 +17,20 @@ const auth = useAuthStore()
 // login, onboarding, and invite acceptance render chrome-less.
 const BARE_ROUTES = ['login', 'welcome', 'invite', 'pricing']
 const chrome = computed(() => auth.isAuthed && !BARE_ROUTES.includes(String(route.name)))
+
+// Safety-net: if a page fails to clear `transitioning` (uncaught error, edge
+// case), auto-dismiss after 5 s so the user is never permanently stuck.
+watch(
+  () => auth.transitioning,
+  (active) => {
+    if (active) {
+      const timer = setTimeout(() => { auth.transitioning = false }, 5000)
+      const stop = watch(() => auth.transitioning, (v) => {
+        if (!v) { clearTimeout(timer); stop() }
+      })
+    }
+  },
+)
 
 // The router guard only checks meta.roles on navigation. The profile doc is a
 // live subscription, so a role change (e.g. an admin demoting this user) can
@@ -48,16 +63,21 @@ watch(
 </script>
 
 <template>
+  <!-- Full-page loader: covers the gap between a successful login and the
+       landing page's initial data arriving. Dismissed once the first chrome
+       route settles (data.loadWorkspace resolves on mount). -->
+  <FullPageLoader v-if="auth.transitioning" />
+
   <!-- The chrome'd RouterView is keyed on the active org so switching orgs
        remounts the page even when the route itself doesn't change (otherwise
        a same-route switch renders the freshly-reset data store as a fake-empty
        workspace). Bare routes (login/welcome/invite/pricing) stay unkeyed. -->
-  <AppShell v-if="chrome">
+  <AppShell v-else-if="chrome">
     <RouterView :key="auth.activeOrgId ?? 'none'" />
   </AppShell>
   <RouterView v-else />
   <!-- First-login tour: chrome-only, so the /welcome funnel and other bare
        routes never see it; it opens once the user lands in a workspace. -->
-  <OnboardingTour v-if="chrome" />
+  <OnboardingTour v-if="chrome && !auth.transitioning" />
   <Toaster />
 </template>

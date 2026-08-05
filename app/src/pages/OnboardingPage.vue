@@ -32,6 +32,7 @@ const declineTarget = ref<PendingInvite | null>(null)
 // createOrg had failed — clear on entry (mirrors LoginPage's mode switchers).
 onMounted(async () => {
   auth.error = null
+  auth.transitioning = false
   try {
     await auth.loadPendingInvites()
   } finally {

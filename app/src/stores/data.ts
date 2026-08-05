@@ -760,6 +760,9 @@ export const useDataStore = defineStore('data', () => {
   // data keeps itself current and repeat calls are free.
   async function loadWorkspace(force = false): Promise<void> {
     await Promise.all([loadUsers(force), loadClients(force), loadAllProjects(force), loadAllTasks(force)])
+    // Clear the full-page loader if it's showing (post-login transition).
+    const auth = useAuthStore()
+    auth.transitioning = false
   }
 
   // ── Creates (managers only; rules enforce) ────────────────────
