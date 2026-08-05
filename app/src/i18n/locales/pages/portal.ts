@@ -17,6 +17,15 @@ const en = {
   submitChanges: 'Submit',
   changesRequested: 'Changes requested',
   ungrouped: 'Ungrouped',
+  back: 'All deliverables',
+  latestCut: 'Watch the latest cut',
+  progress: 'Progress',
+  allStagesDone: 'All stages complete.',
+  versions: 'Versions',
+  watch: 'Watch',
+  feedback: 'Feedback',
+  feedbackPlaceholder: 'Leave feedback for the team…',
+  send: 'Send',
 }
 
 const es: typeof en = {
@@ -38,6 +47,15 @@ const es: typeof en = {
   submitChanges: 'Enviar',
   changesRequested: 'Cambios solicitados',
   ungrouped: 'Sin agrupar',
+  back: 'Todos los entregables',
+  latestCut: 'Ver el último corte',
+  progress: 'Progreso',
+  allStagesDone: 'Todas las etapas completadas.',
+  versions: 'Versiones',
+  watch: 'Ver',
+  feedback: 'Comentarios',
+  feedbackPlaceholder: 'Deja un comentario para el equipo…',
+  send: 'Enviar',
 }
 
 export default { en, es }

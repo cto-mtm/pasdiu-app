@@ -8,7 +8,7 @@ import { useToastStore } from '../stores/toast'
 import { useBusy } from '../composables/useBusy'
 import { removeMemberApi } from '../lib/api'
 import { ROLES } from '../lib/types'
-import type { Role } from '../lib/types'
+import type { Deliverable, Role } from '../lib/types'
 import { isDoneStatus } from '../lib/status'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
 import BaseButton from '../components/BaseButton.vue'
@@ -29,9 +29,39 @@ const toast = useToastStore()
 const uid = computed(() => String(route.params.uid))
 const member = computed(() => data.usersById[uid.value])
 
+// Client contacts are reviewers, never assignees — showing them empty
+// "Working on / Completed" sections reads like missing data. They get a
+// portal-contact panel instead, and the breadcrumb roots at their client.
+const isClientContact = computed(() => member.value?.role === 'client')
+const boundClient = computed(() =>
+  member.value?.clientId ? data.getClient(member.value.clientId) : undefined,
+)
+const crumbs = computed(() =>
+  isClientContact.value && boundClient.value
+    ? [
+        { label: boundClient.value.name, to: { name: 'client', params: { clientId: boundClient.value.id } } },
+        { label: member.value?.displayName ?? '' },
+      ]
+    : [
+        { label: t('team.title'), to: { name: 'team' } },
+        { label: member.value?.displayName ?? '' },
+      ],
+)
+
 const assigned = computed(() => data.tasks.filter((tk) => tk.assigneeUid === uid.value))
 const working = computed(() => assigned.value.filter((tk) => !isDoneStatus(tk.status)))
 const completed = computed(() => assigned.value.filter((tk) => isDoneStatus(tk.status)))
+
+// The contact's portal, from the manager's side: everything shared with
+// their client, awaiting-review first — this is the "do they need to approve
+// something?" answer at a glance.
+const portalDeliverables = ref<Deliverable[]>([])
+const sortedPortal = computed(() =>
+  [...portalDeliverables.value].sort(
+    (a, b) => ((a.status === 'active' ? 0 : 1) - (b.status === 'active' ? 0 : 1)) || a.order - b.order,
+  ),
+)
+const awaitingCount = computed(() => portalDeliverables.value.filter((del) => del.status === 'active').length)
 
 // Edit member
 const showEdit = ref(false)
@@ -103,12 +133,16 @@ async function load() {
     // the org-wide window only holds the first page of tasks by document id,
     // so it could silently miss part of their work. Users/clients/projects
     // listeners feed the name lookups on the rows.
-    await Promise.all([
-      data.loadUsers(),
-      data.loadClients(),
-      data.loadAllProjects(),
-      data.loadAssignedTasks(uid.value),
-    ])
+    await Promise.all([data.loadUsers(), data.loadClients(), data.loadAllProjects()])
+    // Contacts get their portal contents (what's shared / awaiting review)
+    // instead of an assigned-tasks listener — they're reviewers, not
+    // assignees, so that listener would just be an empty query held open.
+    const m = data.usersById[uid.value]
+    if (m?.role !== 'client') {
+      await data.loadAssignedTasks(uid.value)
+    } else if (m.clientId) {
+      portalDeliverables.value = await data.fetchClientPortalDeliverables(m.clientId)
+    }
     loaded.value = true
   } catch {
     loadError.value = true
@@ -119,7 +153,7 @@ onMounted(load)
 
 <template>
   <section v-if="member">
-    <Breadcrumbs class="mb-4" :items="[{ label: t('team.title'), to: { name: 'team' } }, { label: member.displayName }]" />
+    <Breadcrumbs class="mb-4" :items="crumbs" />
 
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="flex items-center gap-3">
@@ -127,7 +161,14 @@ onMounted(load)
           {{ member.displayName.slice(0, 1) }}
         </div>
         <div>
-          <h1 class="text-2xl font-bold tracking-tight" style="color: var(--text);">{{ member.displayName }}</h1>
+          <h1 class="flex items-center gap-2 text-2xl font-bold tracking-tight" style="color: var(--text);">
+            {{ member.displayName }}
+            <span
+              v-if="member.uid === auth.org?.ownerUid"
+              class="rounded px-2 py-0.5 text-xs font-medium"
+              style="background: color-mix(in srgb, var(--accent-cyan) 15%, transparent); color: var(--accent-cyan);"
+            >{{ t('team.owner') }}</span>
+          </h1>
           <p class="text-sm" style="color: var(--text-muted);">
             {{ t('roles.' + member.role) }}<template v-if="member.title"> · {{ member.title }}</template> · {{ member.email }}
           </p>
@@ -136,8 +177,62 @@ onMounted(load)
       <BaseButton v-if="auth.isManager" @click="openEdit">{{ t('team.editMember') }}</BaseButton>
     </div>
 
+    <!-- Client contact: no workload sections — they review, they're never
+         assigned. Point back at their client instead. -->
+    <div v-if="isClientContact" class="mt-8 rounded-xl border p-4" style="background: var(--surface); border-color: var(--border);">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-sm font-semibold uppercase tracking-wide" style="color: var(--text-muted);">{{ t('team.portalContact') }}</h2>
+        <span
+          v-if="awaitingCount"
+          class="rounded-full px-2 py-0.5 text-xs font-medium"
+          style="background: color-mix(in srgb, var(--accent-amber) 15%, transparent); color: var(--accent-amber);"
+        >{{ awaitingCount }} {{ t('portal.awaitingReview') }}</span>
+      </div>
+      <p class="mt-2 text-sm" style="color: var(--text);">
+        {{ boundClient ? t('team.portalContactBody', { name: boundClient.name }) : t('team.noClientLinked') }}
+      </p>
+      <RouterLink
+        v-if="boundClient"
+        :to="{ name: 'client', params: { clientId: boundClient.id } }"
+        class="mt-3 inline-flex items-center gap-1 text-sm font-medium hover:underline"
+        style="color: var(--accent-cyan);"
+      >
+        {{ t('team.viewClient') }} →
+      </RouterLink>
+
+      <!-- Everything shared into their portal, awaiting-review first. Rows
+           link to the manager deliverable page (this page is manager-only). -->
+      <div v-if="sortedPortal.length" class="mt-4">
+        <h3 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--text-muted);">
+          {{ t('team.inPortal') }} <span style="color: var(--text);">({{ sortedPortal.length }})</span>
+        </h3>
+        <div class="mt-2 divide-y overflow-hidden rounded-lg border" style="border-color: var(--border);">
+          <RouterLink
+            v-for="del in sortedPortal"
+            :key="del.id"
+            :to="{ name: 'deliverable', params: { deliverableId: del.id } }"
+            class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 transition-colors hover:bg-[color:var(--surface-2)]"
+            style="background: var(--surface);"
+          >
+            <span class="text-sm" style="color: var(--text);">{{ del.name }}</span>
+            <span
+              v-if="del.status === 'active'"
+              class="rounded px-1.5 py-0.5 text-xs font-medium"
+              style="background: color-mix(in srgb, var(--accent-amber) 15%, transparent); color: var(--accent-amber);"
+            >{{ t('team.awaitingReview') }}</span>
+            <span v-else-if="del.approvedVia" class="text-xs" style="color: var(--accent-emerald);">
+              ✓ {{ t('portal.approvedLabel') }}
+            </span>
+          </RouterLink>
+        </div>
+      </div>
+      <p v-else-if="boundClient" class="mt-3 text-xs" style="color: var(--text-muted);">
+        {{ t('team.portalNothingShared') }}
+      </p>
+    </div>
+
     <!-- Working on -->
-    <div class="mt-8">
+    <div v-if="!isClientContact" class="mt-8">
       <h2 class="text-sm font-semibold uppercase tracking-wide" style="color: var(--text-muted);">
         {{ t('team.workingOn') }} <span style="color: var(--text);">({{ working.length }})</span>
       </h2>
@@ -153,7 +248,7 @@ onMounted(load)
     </div>
 
     <!-- Completed -->
-    <div class="mt-8">
+    <div v-if="!isClientContact" class="mt-8">
       <h2 class="text-sm font-semibold uppercase tracking-wide" style="color: var(--text-muted);">
         {{ t('team.completed') }} <span style="color: var(--text);">({{ completed.length }})</span>
       </h2>

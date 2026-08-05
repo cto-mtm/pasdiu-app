@@ -25,6 +25,7 @@ const ICONS: Record<string, string> = {
   team: 'M17 20v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 10a4 4 0 100-8 4 4 0 000 8zm14 10v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75',
   analytics: 'M18 20V10M12 20V4M6 20v-6',
   settings: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+  schedule: 'M8 2v4M16 2v4M3 9h18M5 4h14a2 2 0 012 2v13a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z',
 }
 
 const navItems = computed(() => {
@@ -33,10 +34,13 @@ const navItems = computed(() => {
   if (auth.isManager) {
     // Analytics/Ledger are paid-plan features — hidden on Free (the router
     // redirects direct hits to Settings; rules protect the data itself).
+    // Analytics · Schedule · Queue lead, in that order (analytics stays
+    // plan-gated, so on Free the row starts at Schedule).
     return [
       ...(has('analytics') ? [{ to: '/analytics', label: t('shell.navAnalytics'), icon: 'analytics' }] : []),
+      { to: '/schedule', label: t('shell.navSchedule'), icon: 'schedule' },
+      { to: '/queue', label: t('shell.navAllTasks'), icon: 'tasks' },
       { to: '/dashboard', label: t('shell.navDashboard'), icon: 'dashboard' },
-      { to: '/all-tasks', label: t('shell.navAllTasks'), icon: 'tasks' },
       { to: '/team', label: t('shell.navTeam'), icon: 'team' },
       ...(has('ledger') ? [{ to: '/ledger', label: t('shell.navLedger'), icon: 'ledger' }] : []),
       ...shared,
@@ -45,7 +49,11 @@ const navItems = computed(() => {
   if (auth.role === 'client') {
     return [{ to: '/portal', label: t('shell.navPortal'), icon: 'portal' }, ...shared]
   }
-  return [{ to: '/slate', label: t('shell.navSlate'), icon: 'slate' }, ...shared]
+  return [
+    { to: '/slate', label: t('shell.navSlate'), icon: 'slate' },
+    { to: '/schedule', label: t('shell.navSchedule'), icon: 'schedule' },
+    ...shared,
+  ]
 })
 
 // Org switcher: setActiveOrg resets the data store and routes home itself.

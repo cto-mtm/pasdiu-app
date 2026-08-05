@@ -26,7 +26,7 @@ const routes: RouteRecordRaw[] = [
   // Manager (admin/pm) surfaces
   { path: '/dashboard', name: 'dashboard', component: () => import('../pages/DashboardPage.vue'), meta: { roles: ['admin', 'pm'] } },
   { path: '/clients/:clientId', name: 'client', component: () => import('../pages/ClientDetailPage.vue'), meta: { roles: ['admin', 'pm'] } },
-  { path: '/all-tasks', name: 'all-tasks', component: () => import('../pages/AllTasksPage.vue'), meta: { roles: ['admin', 'pm'] } },
+  { path: '/queue', name: 'queue', component: () => import('../pages/AllTasksPage.vue'), meta: { roles: ['admin', 'pm'] } },
   { path: '/team', name: 'team', component: () => import('../pages/TeamPage.vue'), meta: { roles: ['admin', 'pm'] } },
   { path: '/team/:uid', name: 'team-member', component: () => import('../pages/TeamMemberPage.vue'), meta: { roles: ['admin', 'pm'] } },
   { path: '/analytics', name: 'analytics', component: () => import('../pages/AnalyticsPage.vue'), meta: { roles: ['admin', 'pm'], feature: 'analytics' } },
@@ -40,11 +40,15 @@ const routes: RouteRecordRaw[] = [
   { path: '/projects/:projectId', name: 'project', component: () => import('../pages/ProjectBoardPage.vue'), meta: { roles: ['admin', 'pm', 'contractor'] } },
   { path: '/deliverables/:deliverableId', name: 'deliverable', component: () => import('../pages/DeliverableDetailPage.vue'), meta: { roles: ['admin', 'pm', 'contractor'] } },
   { path: '/calendar', name: 'calendar', component: () => import('../pages/CalendarPage.vue'), meta: { roles: ['admin', 'pm', 'contractor'] } },
+  { path: '/schedule', name: 'schedule', component: () => import('../pages/SchedulePage.vue'), meta: { roles: ['admin', 'pm', 'contractor'] } },
   { path: '/tasks/:taskId', name: 'task', component: () => import('../pages/IterationRoomPage.vue'), meta: { roles: ['admin', 'pm', 'contractor', 'client'] } },
 
   // Contractor + client surfaces
   { path: '/slate', name: 'slate', component: () => import('../pages/SlatePage.vue'), meta: { roles: ['contractor'] } },
   { path: '/portal', name: 'portal', component: () => import('../pages/ClientPortalPage.vue'), meta: { roles: ['client'] } },
+  // Client-facing deliverable detail — deliberately separate from the manager
+  // DeliverableDetailPage, whose reads the rules reject for the client role.
+  { path: '/portal/:deliverableId', name: 'portal-deliverable', component: () => import('../pages/PortalDeliverablePage.vue'), meta: { roles: ['client'] } },
 
   { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('../pages/NotFoundPage.vue') },
 ]

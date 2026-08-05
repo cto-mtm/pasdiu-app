@@ -26,6 +26,7 @@ import calendar from './locales/pages/calendar'
 import deliverable from './locales/pages/deliverable'
 import iteration from './locales/pages/iteration'
 import slate from './locales/pages/slate'
+import schedule from './locales/pages/schedule'
 import portal from './locales/pages/portal'
 import ledger from './locales/pages/ledger'
 import team from './locales/pages/team'
@@ -65,6 +66,7 @@ const messages = {
     deliverableDetail: deliverable.en,
     iteration: iteration.en,
     slate: slate.en,
+    schedule: schedule.en,
     portal: portal.en,
     ledger: ledger.en,
     team: team.en,
@@ -99,6 +101,7 @@ const messages = {
     deliverableDetail: deliverable.es,
     iteration: iteration.es,
     slate: slate.es,
+    schedule: schedule.es,
     portal: portal.es,
     ledger: ledger.es,
     team: team.es,
@@ -114,9 +117,14 @@ const messages = {
 const datetimeFormats = {
   en: {
     short: { year: 'numeric', month: 'short', day: 'numeric' },
+    // Week-strip header ("August 2026") and long day headings (Schedule).
+    monthYear: { year: 'numeric', month: 'long' },
+    weekday: { weekday: 'long', month: 'long', day: 'numeric' },
   },
   es: {
     short: { year: 'numeric', month: 'short', day: 'numeric' },
+    monthYear: { year: 'numeric', month: 'long' },
+    weekday: { weekday: 'long', month: 'long', day: 'numeric' },
   },
 } as const
 

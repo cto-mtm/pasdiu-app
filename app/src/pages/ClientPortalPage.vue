@@ -156,14 +156,23 @@ onMounted(load)
             class="flex items-center justify-between px-4 py-3"
             style="background: var(--surface);"
           >
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-sm font-medium" style="color: var(--text);">{{ del.name }}</span>
+            <!-- The row's identity is a link into the deliverable's detail
+                 (stages, cuts, feedback); the approval buttons stay siblings
+                 so approving never requires leaving the list. -->
+            <RouterLink
+              :to="{ name: 'portal-deliverable', params: { deliverableId: del.id } }"
+              class="group flex min-w-0 flex-wrap items-center gap-2"
+            >
+              <span class="text-sm font-medium transition-colors group-hover:underline" style="color: var(--text);">{{ del.name }}</span>
               <PriorityBadge :priority="del.priority" />
               <span v-if="del.approvedVia" class="text-xs" style="color: var(--accent-emerald);">
                 ✓ {{ t('portal.approvedLabel') }}
                 <template v-if="del.approvedVia === 'in_person'"> ({{ t('portal.onBehalf') }})</template>
               </span>
-            </div>
+              <span class="text-xs opacity-0 transition-opacity group-hover:opacity-100" style="color: var(--accent-cyan);">
+                {{ t('portal.review') }} →
+              </span>
+            </RouterLink>
             <div v-if="del.status === 'active'" class="flex items-center gap-2">
               <button
                 class="rounded-lg border px-3 py-1.5 text-xs"

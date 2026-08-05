@@ -646,29 +646,25 @@ export const useDataStore = defineStore('data', () => {
     ledgerMayHaveMore.value = snap.docs.length === LEDGER_PAGE_SIZE
   }
 
-  // ── Filtered tasks (All Tasks past the live window) ───────────
+  // ── Status-filtered tasks (Task Queue past the live window) ───
   // The org-wide listener only covers the first PAGE_SIZE tasks by document
-  // id, so once a workspace outgrows it, a client-side filter over the store
-  // silently misses matches. When a filter is active AND the window is
-  // incomplete, All Tasks switches to this: a server-side equality query
-  // (status and/or assignee), ordered by dueAt for stable pagination.
-  // One filter combo is held at a time; changing the combo replaces it.
-  // Composite indexes: (orgId, status, dueAt), (orgId, assigneeUid, dueAt),
-  // (orgId, assigneeUid, status, dueAt) in firestore.indexes.json.
-  function filteredConstraints(f: { status?: TaskStatus; assigneeUid?: string }): QueryConstraint[] {
-    const cs: QueryConstraint[] = []
-    if (f.status) cs.push(where('status', '==', f.status))
-    if (f.assigneeUid) cs.push(where('assigneeUid', '==', f.assigneeUid))
-    return cs
-  }
-  async function loadFilteredTasks(f: { status?: TaskStatus; assigneeUid?: string }, force = false): Promise<void> {
-    const key = `${f.status ?? ''}|${f.assigneeUid ?? ''}`
+  // id, so once a workspace outgrows it, a client-side status cut over the
+  // store silently misses matches. When a status filter is active AND the
+  // window is incomplete, the queue switches to this: a server-side
+  // `status in [...]` query (a list, so the board's aggregate "In Review"
+  // cut works too), ordered by dueAt for stable pagination. One status set
+  // is held at a time; changing it replaces the results.
+  // Composite index: (orgId, status, dueAt) in firestore.indexes.json —
+  // `in` is a disjunction of equalities, so the one index serves any set.
+  async function loadFilteredTasks(statuses: TaskStatus[], force = false): Promise<void> {
+    if (!statuses.length) return
+    const key = [...statuses].sort().join(',')
     if (!force && key === filteredKey && isFresh(`filteredTasks:${key}`)) return
     const orgId = requireOrgId()
     const snap = await getDocs(query(
       collection(db, 'tasks'),
       where('orgId', '==', orgId),
-      ...filteredConstraints(f),
+      where('status', 'in', statuses),
       orderBy('dueAt'),
       limit(FILTERED_PAGE_SIZE),
     ))
@@ -678,14 +674,14 @@ export const useDataStore = defineStore('data', () => {
     filteredMayHaveMore.value = snap.docs.length === FILTERED_PAGE_SIZE
     markLoaded(`filteredTasks:${key}`)
   }
-  async function loadMoreFilteredTasks(f: { status?: TaskStatus; assigneeUid?: string }): Promise<void> {
-    const key = `${f.status ?? ''}|${f.assigneeUid ?? ''}`
+  async function loadMoreFilteredTasks(statuses: TaskStatus[]): Promise<void> {
+    const key = [...statuses].sort().join(',')
     if (key !== filteredKey || !filteredMayHaveMore.value || !filteredCursor) return
     const orgId = requireOrgId()
     const snap = await getDocs(query(
       collection(db, 'tasks'),
       where('orgId', '==', orgId),
-      ...filteredConstraints(f),
+      where('status', 'in', statuses),
       orderBy('dueAt'),
       startAfter(filteredCursor),
       limit(FILTERED_PAGE_SIZE),
@@ -728,6 +724,21 @@ export const useDataStore = defineStore('data', () => {
     const orgId = requireOrgId()
     const snap = await getCountFromServer(query(collection(db, 'projects'), where('orgId', '==', orgId)))
     return snap.data().count
+  }
+
+  // What a client sees in their portal: their visible deliverables. Used by
+  // the manager-facing contact profile to answer "what's sitting with them".
+  // Returned to the caller (not upserted) so it never mixes with the board's
+  // paged deliverable window. Index: (orgId, clientId, clientVisible).
+  async function fetchClientPortalDeliverables(clientId: string): Promise<Deliverable[]> {
+    const orgId = requireOrgId()
+    const snap = await getDocs(query(
+      collection(db, 'deliverables'),
+      where('orgId', '==', orgId),
+      where('clientId', '==', clientId),
+      where('clientVisible', '==', true),
+    ))
+    return snap.docs.map((d) => mapDeliverable(d.id, d.data()))
   }
 
   // ── Packages sold against a project (PackageQuota, board) ─────
@@ -1125,6 +1136,40 @@ export const useDataStore = defineStore('data', () => {
       versionId, authorUid, body, resolved: false, createdAt: serverTimestamp(),
     }))
   }
+  // ── Deliverable thread (versions + notes shared across stages) ──
+  // THE defining property of the deliverable (README: finding 1): versions and
+  // feedback live on the deliverable so they survive stage handoffs. Any task
+  // that belongs to a deliverable reads/writes THIS thread — a per-task silo
+  // would recreate exactly the recorder→editor lost-notes problem the entity
+  // exists to solve. The task-level thread above remains for standalone tasks.
+  async function loadDeliverableVersions(deliverableId: string): Promise<Version[]> {
+    const snap = await getDocs(collection(db, 'deliverables', deliverableId, 'versions'))
+    return snap.docs
+      .map((d) => mapVersion(d.id, d.data()))
+      .sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0))
+  }
+  async function loadDeliverableNotes(deliverableId: string): Promise<Note[]> {
+    const snap = await getDocs(query(collection(db, 'deliverables', deliverableId, 'notes'), orderBy('createdAt', 'asc')))
+    return snap.docs.map((d) => mapNote(d.id, d.data()))
+  }
+  async function addDeliverableVersion(deliverableId: string, note: string, mediaUrl = ''): Promise<Version> {
+    const existing = await loadDeliverableVersions(deliverableId)
+    const label = `v${existing.length + 1}`
+    const ref = await guarded(() => addDoc(collection(db, 'deliverables', deliverableId, 'versions'), {
+      label, note, createdAt: serverTimestamp(), mediaUrl,
+    }))
+    return { id: ref.id, label, note, createdAt: new Date(), mediaUrl }
+  }
+  // Deliverable-level note. Same shape and rules contract as task notes;
+  // clients may write here — it's the portal's "leave feedback" channel.
+  async function addDeliverableNote(deliverableId: string, versionId: string, authorUid: string, body: string): Promise<void> {
+    await guarded(() => addDoc(collection(db, 'deliverables', deliverableId, 'notes'), {
+      versionId, authorUid, body, resolved: false, createdAt: serverTimestamp(),
+    }))
+  }
+  async function setDeliverableNoteResolved(deliverableId: string, noteId: string, resolved: boolean): Promise<void> {
+    await guarded(() => updateDoc(doc(db, 'deliverables', deliverableId, 'notes', noteId), { resolved }))
+  }
   async function setNoteResolved(taskId: string, noteId: string, resolved: boolean): Promise<void> {
     await guarded(() => updateDoc(doc(db, 'tasks', taskId, 'notes', noteId), { resolved }))
   }
@@ -1144,7 +1189,7 @@ export const useDataStore = defineStore('data', () => {
     ledgerTasks, ledgerMayHaveMore, loadLedger, loadMoreLedger,
     filteredTasks, filteredMayHaveMore, loadFilteredTasks, loadMoreFilteredTasks,
     fetchTaskStatusCounts, fetchTaskCountsForClients, fetchActiveTaskCounts, fetchProjectCount,
-    loadPackagesForProject,
+    loadPackagesForProject, fetchClientPortalDeliverables,
     reset, loadWorkspace,
     loadUsers, userName, teamMembers,
     loadClients, loadClient, getClient,
@@ -1162,5 +1207,6 @@ export const useDataStore = defineStore('data', () => {
     updateTaskStatus, setProjectTasksVisibility,
     deleteTask, deleteSubGroup, deleteProject, deleteClient,
     loadVersions, loadNotes, addNote, setNoteResolved, addVersion,
+    loadDeliverableVersions, loadDeliverableNotes, addDeliverableVersion, addDeliverableNote, setDeliverableNoteResolved,
   }
 })

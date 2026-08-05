@@ -54,7 +54,9 @@ export interface BoardColumn {
   labelKey: string
 }
 
-const REVIEW_STATUSES: TaskStatus[] = ['revisions', 'approved', 'delivered']
+// Exported: the task queue page offers the same "In Review" cut as the board
+// column, so the two must stay one concept.
+export const REVIEW_STATUSES: TaskStatus[] = ['revisions', 'approved', 'delivered']
 
 export const BOARD_COLUMNS: BoardColumn[] = [
   ...MANUAL_TASK_STATUSES.filter((s) => s !== 'done').map((s) => ({

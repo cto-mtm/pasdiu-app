@@ -7,6 +7,7 @@ const en = {
   projectsLabel: 'projects',
   blockedTitle: 'Blocked tasks',
   blockedSince: 'since {date}',
+  revisionsTitle: 'Sent back by clients',
 }
 
 const es: typeof en = {
@@ -18,6 +19,7 @@ const es: typeof en = {
   projectsLabel: 'proyectos',
   blockedTitle: 'Tareas bloqueadas',
   blockedSince: 'desde {date}',
+  revisionsTitle: 'Devueltas por clientes',
 }
 
 export default { en, es }

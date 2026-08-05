@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useDataStore } from '../stores/data'
@@ -61,6 +61,40 @@ const blockedTasks = computed(() =>
   data.tasks
     .filter((tk) => tk.status === 'blocked')
     .sort((a, b) => (a.blockedAt?.getTime() ?? 0) - (b.blockedAt?.getTime() ?? 0)),
+)
+
+// Revision loops get the same treatment as blockages: a client sending work
+// back is the signal the agency reacts to (README finding 1 territory), and
+// 'revisions' is deliberately NOT 'blocked' — it's actionable work, so it
+// gets its own strip instead of polluting the impediment list. Soonest due
+// first.
+const revisionTasks = computed(() =>
+  data.tasks
+    .filter((tk) => tk.status === 'revisions')
+    .sort((a, b) => (a.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (b.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER)),
+)
+
+// The client's most recent note from each affected deliverable's thread —
+// the "what do they actually want changed" preview, so a manager can triage
+// without opening every task. Keyed by deliverableId; fetched only for the
+// deliverables actually in the strip.
+const revisionNotes = ref<Record<string, string>>({})
+watch(
+  () => [...new Set(revisionTasks.value.map((tk) => tk.deliverableId).filter(Boolean))].sort().join(','),
+  async () => {
+    const ids = [...new Set(revisionTasks.value.map((tk) => tk.deliverableId).filter(Boolean))]
+    const entries = await Promise.all(ids.map(async (id) => {
+      try {
+        const thread = await data.loadDeliverableNotes(id)
+        const clientNote = [...thread].reverse().find((n) => data.usersById[n.authorUid]?.role === 'client')
+        return [id, clientNote?.body ?? ''] as const
+      } catch {
+        return [id, ''] as const
+      }
+    }))
+    revisionNotes.value = Object.fromEntries(entries)
+  },
+  { immediate: true },
 )
 const taskContext = (clientId: string, projectId: string) =>
   [data.getClient(clientId)?.name, data.getProject(projectId)?.name].filter(Boolean).join(' · ')
@@ -126,6 +160,33 @@ onMounted(load)
             </div>
             <span v-if="tk.blockedAt" class="shrink-0 text-xs" style="color: var(--text-muted);">
               {{ t('dashboard.blockedSince', { date: d(tk.blockedAt, 'short') }) }}
+            </span>
+          </RouterLink>
+        </div>
+      </div>
+
+      <!-- Revision loops — work clients sent back, with their reason inline -->
+      <div v-if="revisionTasks.length" class="mt-6">
+        <h2 class="text-sm font-semibold uppercase tracking-wide" style="color: var(--accent-amber);">
+          {{ t('dashboard.revisionsTitle') }}
+        </h2>
+        <div class="mt-2 divide-y overflow-hidden rounded-xl border" style="border-color: var(--border);">
+          <RouterLink
+            v-for="tk in revisionTasks"
+            :key="tk.id"
+            :to="{ name: 'task', params: { taskId: tk.id } }"
+            class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 transition-colors hover:bg-[color:var(--surface-2)]"
+            style="background: var(--surface);"
+          >
+            <div class="min-w-0">
+              <p class="text-sm font-medium" style="color: var(--text);">{{ tk.title }}</p>
+              <p class="text-xs" style="color: var(--text-muted);">{{ taskContext(tk.clientId, tk.projectId) }}</p>
+              <p v-if="revisionNotes[tk.deliverableId]" class="mt-1 truncate text-xs" style="color: var(--accent-amber);">
+                “{{ revisionNotes[tk.deliverableId] }}”
+              </p>
+            </div>
+            <span v-if="tk.dueAt" class="shrink-0 text-xs" style="color: var(--text-muted);">
+              {{ d(tk.dueAt, 'short') }}
             </span>
           </RouterLink>
         </div>

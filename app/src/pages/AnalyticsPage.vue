@@ -3,9 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useDataStore } from '../stores/data'
-import { TASK_STATUSES } from '../lib/types'
 import type { TaskStatus } from '../lib/types'
-import { statusColor, statusKey } from '../lib/status'
+import { BOARD_COLUMNS } from '../lib/status'
 import BaseButton from '../components/BaseButton.vue'
 import DonutChart from '../components/DonutChart.vue'
 import BarChart from '../components/BarChart.vue'
@@ -16,9 +15,11 @@ const { t } = useI18n()
 const router = useRouter()
 const data = useDataStore()
 
-// Clicking a status segment drills into the filtered All Tasks queue.
+// Clicking a segment drills into the matching Task Queue cut — segment ids
+// are BOARD_COLUMNS keys, which the queue's ?status= accepts directly
+// (including the folded 'review').
 function drillStatus(status: string) {
-  router.push({ name: 'all-tasks', query: { status } })
+  router.push({ name: 'queue', query: { status } })
 }
 
 // Every NUMBER on this page comes from server-side count() aggregations, not
@@ -36,12 +37,17 @@ const totals = computed(() => ({
   tasks: statusCounts.value ? Object.values(statusCounts.value).reduce((a, b) => a + b, 0) : 0,
 }))
 
+// Folded to the board's columns: humans speak four kanban statuses plus one
+// "In Review" bucket; the three flow-written statuses (revisions/approved/
+// delivered) render as that single segment here exactly as they do on the
+// kanban. The full seven-status counts still arrive from the server — the
+// fold is presentation, the model keeps its vocabulary.
 const statusSegments = computed(() =>
-  TASK_STATUSES.map((s) => ({
-    id: s,
-    label: t(statusKey(s)),
-    value: statusCounts.value?.[s] ?? 0,
-    color: statusColor(s),
+  BOARD_COLUMNS.map((col) => ({
+    id: col.key,
+    label: t(col.labelKey),
+    value: col.statuses.reduce((sum, s) => sum + (statusCounts.value?.[s] ?? 0), 0),
+    color: col.color,
   })),
 )
 

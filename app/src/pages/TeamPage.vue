@@ -29,21 +29,26 @@ const { canInvite } = useEntitlements()
 // org's entire task collection to display ~10 numbers — exact at any
 // workspace size, ~1 read per member instead of one per task.
 const activeCounts = ref<Record<string, number>>({})
+// The TEAM only — client-role members are external reviewers, managed from
+// their client's page (Portal access), not from the team roster.
 const members = computed(() =>
-  Object.values(data.usersById).map((u) => ({
+  data.teamMembers.map((u) => ({
     ...u,
     active: activeCounts.value[u.uid] ?? 0,
   })),
 )
+// Same split for pending invites: client invites live on the client page.
+const teamInvites = computed(() => data.invites.filter((inv) => inv.role !== 'client'))
 
-// Invite member
+// Invite a TEAM member (admin/pm/contractor). Client contacts are invited
+// from their client's page, which pins role + clientId — offering 'client'
+// here forced managers to pick the client from a dropdown out of context.
+const TEAM_INVITE_ROLES = ROLES.filter((r) => r !== 'client')
 const showInvite = ref(false)
 const showSeatUpsell = ref(false)
 const inviteEmail = ref('')
 const inviteRole = ref<Role>('contractor')
 const inviteTitle = ref('')
-const inviteClientId = ref('')
-const clientError = ref(false)
 const { busy, run } = useBusy()
 
 function openInvite() {
@@ -56,21 +61,15 @@ function openInvite() {
   inviteEmail.value = ''
   inviteRole.value = 'contractor'
   inviteTitle.value = ''
-  inviteClientId.value = ''
-  clientError.value = false
   showInvite.value = true
 }
 async function saveInvite() {
   const email = inviteEmail.value.trim().toLowerCase()
   if (!email) return
-  // The client role must be tied to a client entity — rules gate their reads by it.
-  clientError.value = inviteRole.value === 'client' && !inviteClientId.value
-  if (clientError.value) return
   await run(async () => {
     await data.createInvite({
       email,
       role: inviteRole.value,
-      ...(inviteRole.value === 'client' ? { clientId: inviteClientId.value } : {}),
       ...(inviteTitle.value.trim() ? { title: inviteTitle.value.trim() } : {}),
     })
     // Viral-loop signal (BUSINESS_MODEL §7.7) — role only, never the email.
@@ -122,12 +121,12 @@ const loadError = ref(false)
 async function load() {
   loadError.value = false
   try {
-    // Clients feed the invite modal's client picker; invites feed the pending
-    // list. Roster + invites are live listeners (invite accepts made in other
+    // Roster + invites are live listeners (invite accepts made in other
     // sessions stream in); the per-member counts are one-shot aggregations,
-    // which is what the refresh control re-fetches.
-    await Promise.all([data.loadUsers(), data.loadClients(), data.loadInvites()])
-    activeCounts.value = await data.fetchActiveTaskCounts(Object.keys(data.usersById))
+    // which is what the refresh control re-fetches. Team uids only — client
+    // contacts have no workload and no card here.
+    await Promise.all([data.loadUsers(), data.loadInvites()])
+    activeCounts.value = await data.fetchActiveTaskCounts(data.teamMembers.map((u) => u.uid))
   } catch {
     loadError.value = true
   }
@@ -171,7 +170,16 @@ onMounted(load)
             {{ m.displayName.slice(0, 1) }}
           </div>
           <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-medium" style="color: var(--text);">{{ m.displayName }}</p>
+            <p class="flex items-center gap-1.5 truncate text-sm font-medium" style="color: var(--text);">
+              {{ m.displayName }}
+              <!-- Ownership is a fact on the org doc (ownerUid), not a role —
+                   surfaced here so two admins are never indistinguishable. -->
+              <span
+                v-if="m.uid === auth.org?.ownerUid"
+                class="rounded px-1.5 py-0.5 text-xs font-medium"
+                style="background: color-mix(in srgb, var(--accent-cyan) 15%, transparent); color: var(--accent-cyan);"
+              >{{ t('team.owner') }}</span>
+            </p>
             <p class="truncate text-xs" style="color: var(--text-muted);">
               {{ t('roles.' + m.role) }}<template v-if="m.title"> · {{ m.title }}</template>
             </p>
@@ -183,14 +191,14 @@ onMounted(load)
         </RouterLink>
       </div>
 
-      <!-- Pending invites -->
-      <div v-if="data.invites.length" class="mt-8">
+      <!-- Pending TEAM invites (client invites live on their client's page) -->
+      <div v-if="teamInvites.length" class="mt-8">
         <h2 class="text-sm font-semibold uppercase tracking-wide" style="color: var(--text-muted);">
-          {{ t('team.pendingInvites') }} <span style="color: var(--text);">({{ data.invites.length }})</span>
+          {{ t('team.pendingInvites') }} <span style="color: var(--text);">({{ teamInvites.length }})</span>
         </h2>
         <div class="mt-3 divide-y overflow-hidden rounded-xl border" style="border-color: var(--border); background: var(--surface);">
           <div
-            v-for="inv in data.invites"
+            v-for="inv in teamInvites"
             :key="inv.id"
             class="flex flex-wrap items-center justify-between gap-2 px-4 py-3"
             style="border-color: var(--border);"
@@ -258,19 +266,12 @@ onMounted(load)
         <label class="block">
           <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('settings.role') }}</span>
           <BaseSelect v-model="inviteRole">
-            <option v-for="r in ROLES" :key="r" :value="r">{{ t('roles.' + r) }}</option>
+            <option v-for="r in TEAM_INVITE_ROLES" :key="r" :value="r">{{ t('roles.' + r) }}</option>
           </BaseSelect>
         </label>
-        <label v-if="inviteRole !== 'client'" class="block">
+        <label class="block">
           <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('team.titleLabel') }}</span>
           <BaseInput v-model="inviteTitle" :placeholder="t('team.titlePlaceholder')" />
-        </label>
-        <label v-if="inviteRole === 'client'" class="block">
-          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('team.clientLabel') }}</span>
-          <BaseSelect v-model="inviteClientId">
-            <option v-for="c in data.clients" :key="c.id" :value="c.id">{{ c.name }}</option>
-          </BaseSelect>
-          <span v-if="clientError" class="mt-1 block text-xs" style="color: var(--accent-amber);">{{ t('team.clientRequired') }}</span>
         </label>
         <ModalFooter :label="t('actions.create')" :busy="busy" @cancel="showInvite = false" @submit="saveInvite" />
       </form>

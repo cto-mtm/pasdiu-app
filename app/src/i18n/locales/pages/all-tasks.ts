@@ -1,20 +1,18 @@
 const en = {
-  title: 'All Tasks',
-  subtitle: 'Every task across all clients and projects.',
+  title: 'Task Queue',
+  subtitle: 'Work across every client, cut by status.',
   filterStatus: 'Status',
-  filterAssignee: 'Assignee',
   all: 'All',
-  empty: 'No tasks match these filters.',
+  empty: 'No tasks in this cut.',
   loadMore: 'Load more',
 }
 
 const es: typeof en = {
-  title: 'Todas las tareas',
-  subtitle: 'Todas las tareas de todos los clientes y proyectos.',
+  title: 'Cola de tareas',
+  subtitle: 'Trabajo de todos los clientes, filtrado por estado.',
   filterStatus: 'Estado',
-  filterAssignee: 'Responsable',
   all: 'Todas',
-  empty: 'Ninguna tarea coincide con estos filtros.',
+  empty: 'No hay tareas en este filtro.',
   loadMore: 'Cargar más',
 }
 

@@ -42,17 +42,35 @@ const { busy, run } = useBusy()
 const project = computed(() => (task.value ? data.getProject(task.value.projectId) : undefined))
 const client = computed(() => (task.value ? data.getClient(task.value.clientId) : undefined))
 const selectedVersion = computed(() => versions.value.find((v) => v.id === selectedVersionId.value))
-const versionNotes = computed(() => notes.value.filter((n) => n.versionId === selectedVersionId.value))
+// The selected version's notes PLUS deliverable-level notes (versionId '') —
+// the portal's request-changes flow writes those, and the contractor redoing
+// the work must see the client's reason here, not only on the portal.
+const versionNotes = computed(() =>
+  notes.value.filter((n) => n.versionId === selectedVersionId.value || n.versionId === ''),
+)
+
+// ── The thread's home ───────────────────────────────────────────
+// A deliverable-linked task shares the DELIVERABLE's versions + feedback —
+// one thread across every stage, so the recorder's cut and the client's note
+// are exactly what the editor sees (README finding 1: handoffs must not lose
+// notes). Only standalone tasks (deliverableId '') keep a private thread.
+const threadDeliverableId = computed(() => task.value?.deliverableId || '')
 
 async function refreshNotes() {
-  notes.value = await data.loadNotes(taskId.value)
+  notes.value = threadDeliverableId.value
+    ? await data.loadDeliverableNotes(threadDeliverableId.value)
+    : await data.loadNotes(taskId.value)
 }
 
 async function addNote() {
   const body = draft.value.trim()
   if (!body || !selectedVersionId.value || !auth.profile) return
   await run(async () => {
-    await data.addNote(taskId.value, selectedVersionId.value!, auth.profile!.uid, body)
+    if (threadDeliverableId.value) {
+      await data.addDeliverableNote(threadDeliverableId.value, selectedVersionId.value!, auth.profile!.uid, body)
+    } else {
+      await data.addNote(taskId.value, selectedVersionId.value!, auth.profile!.uid, body)
+    }
     draft.value = ''
     await refreshNotes()
   })
@@ -93,11 +111,11 @@ function openAddVersion() {
 async function confirmAddVersion() {
   await run(async () => {
     // Media lives on the customer's own storage (MVP): store a sanitized link.
-    const v = await data.addVersion(
-      taskId.value,
-      versionNote.value.trim(),
-      sanitizeExternalUrl(versionMediaUrl.value),
-    )
+    const note = versionNote.value.trim()
+    const url = sanitizeExternalUrl(versionMediaUrl.value)
+    const v = threadDeliverableId.value
+      ? await data.addDeliverableVersion(threadDeliverableId.value, note, url)
+      : await data.addVersion(taskId.value, note, url)
     versions.value = [...versions.value, v]
     selectedVersionId.value = v.id
     showAddVersion.value = false
@@ -165,7 +183,11 @@ function canResolve(n: Note): boolean {
 }
 async function toggleResolve(n: Note) {
   await run(async () => {
-    await data.setNoteResolved(taskId.value, n.id, !n.resolved)
+    if (threadDeliverableId.value) {
+      await data.setDeliverableNoteResolved(threadDeliverableId.value, n.id, !n.resolved)
+    } else {
+      await data.setNoteResolved(taskId.value, n.id, !n.resolved)
+    }
     await refreshNotes()
   })
 }
@@ -192,7 +214,10 @@ async function load() {
     if (tk) {
       // Load only THIS task's client/project (client role can't query all clients).
       await Promise.all([data.loadClient(tk.clientId), data.loadProject(tk.projectId)])
-      versions.value = await data.loadVersions(taskId.value)
+      // Deliverable-linked tasks read the deliverable's shared thread.
+      versions.value = tk.deliverableId
+        ? await data.loadDeliverableVersions(tk.deliverableId)
+        : await data.loadVersions(taskId.value)
       selectedVersionId.value = versions.value.at(-1)?.id ?? null
       await refreshNotes()
 
@@ -361,6 +386,11 @@ onMounted(load)
             + {{ t('iteration.addVersion') }}
           </button>
         </div>
+        <!-- Make the shared-thread model visible: cuts and feedback here are
+             the deliverable's, not this stage's alone. -->
+        <p v-if="threadDeliverableId" class="mt-1 text-xs" style="color: var(--text-muted);">
+          {{ t('iteration.sharedThread') }}
+        </p>
         <div class="mt-2 flex flex-wrap gap-2">
           <button
             v-for="v in versions"

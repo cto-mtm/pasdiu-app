@@ -1,6 +1,7 @@
 const en = {
   navDashboard: 'Clients',
-  navAllTasks: 'All Tasks',
+  navAllTasks: 'Task Queue',
+  navSchedule: 'Schedule',
   navAnalytics: 'Analytics',
   navTeam: 'Team',
   navLedger: 'Ledger',
@@ -23,7 +24,8 @@ const en = {
 
 const es: typeof en = {
   navDashboard: 'Clientes',
-  navAllTasks: 'Tareas',
+  navAllTasks: 'Cola de tareas',
+  navSchedule: 'Agenda',
   navAnalytics: 'Analíticas',
   navTeam: 'Equipo',
   navLedger: 'Registro',

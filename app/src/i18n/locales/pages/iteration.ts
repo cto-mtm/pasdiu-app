@@ -14,6 +14,7 @@ const en = {
   addNote: 'Add a note…',
   send: 'Send',
   noVersions: 'No versions uploaded yet.',
+  sharedThread: 'Shared across every stage of this deliverable — cuts and feedback follow the work, not the task.',
   noFeedback: 'No feedback on this version yet.',
 }
 
@@ -33,6 +34,7 @@ const es: typeof en = {
   addNote: 'Añadir una nota…',
   send: 'Enviar',
   noVersions: 'Aún no hay versiones subidas.',
+  sharedThread: 'Compartido entre todas las etapas de este entregable — los cortes y comentarios siguen al trabajo, no a la tarea.',
   noFeedback: 'Aún no hay comentarios en esta versión.',
 }
 

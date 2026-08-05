@@ -30,6 +30,14 @@ const en = {
   removeMember: 'Remove from workspace',
   removeConfirm: 'Remove {name} from this workspace? They will lose access to all its projects and tasks.',
   removed: 'Member removed.',
+  owner: 'Owner',
+  portalContact: 'Portal contact',
+  portalContactBody: 'Reviews, approves, and leaves feedback on work shared with {name} in the client portal.',
+  noClientLinked: 'Not linked to a client yet — edit this member to assign one.',
+  viewClient: 'View client',
+  inPortal: 'In their portal',
+  awaitingReview: 'Awaiting review',
+  portalNothingShared: 'Nothing has been shared with this client yet.',
 }
 
 const es: typeof en = {
@@ -64,6 +72,14 @@ const es: typeof en = {
   removeMember: 'Quitar del espacio de trabajo',
   removeConfirm: '\u00bfQuitar a {name} de este espacio de trabajo? Perder\u00e1 el acceso a todos sus proyectos y tareas.',
   removed: 'Miembro eliminado.',
+  owner: 'Propietario',
+  portalContact: 'Contacto del portal',
+  portalContactBody: 'Revisa, aprueba y deja comentarios sobre el trabajo compartido con {name} en el portal del cliente.',
+  noClientLinked: 'A\u00fan no est\u00e1 vinculado a un cliente \u2014 edita este miembro para asignarle uno.',
+  viewClient: 'Ver cliente',
+  inPortal: 'En su portal',
+  awaitingReview: 'Pendiente de revisi\u00f3n',
+  portalNothingShared: 'A\u00fan no se ha compartido nada con este cliente.',
 }
 
 export default { en, es }
