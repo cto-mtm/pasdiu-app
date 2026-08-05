@@ -201,10 +201,14 @@ const TASKS = [
   // Older batches — off the board's first page until "load earlier" is used.
   { id: "t14", sg: "sg_may", title: "May recap reel", status: "done", assignee: "u_editor", due: -60, order: 0, versions: 1, visible: true },
   { id: "t15", sg: "sg_june", title: "June recap reel", status: "done", assignee: "u_editor2", due: -30, order: 0, versions: 1, visible: true },
-  { id: "t1", sg: "sg_reels", title: "Reel 01 — Teaser", status: "in_progress", assignee: "u_editor", due: 2, order: 0, versions: 2, visible: true },
-  { id: "t2", sg: "sg_reels", title: "Reel 02 — Product hero", status: "revisions", assignee: "u_editor2", due: 1, order: 1, versions: 3, visible: true },
-  { id: "t3", sg: "sg_reels", title: "Reel 03 — Testimonial", status: "backlog", assignee: "u_editor", due: 5, order: 2, versions: 0, visible: false },
-  { id: "t4", sg: "sg_yt", title: "60s Cutdown", status: "approved", assignee: "u_editor2", due: -1, order: 0, versions: 2, visible: true },
+  // Standalone tasks are STANDALONE work (deliverableId '') — never a copy of
+  // a deliverable's name. The earlier seed titled t1/t2/t4/t11 identically to
+  // del_1/del_2/del_4/del_5, which demoed as two "Reel 02"s with different
+  // version threads and made the deliverable model look broken.
+  { id: "t1", sg: "sg_reels", title: "Reels cover thumbnails", status: "in_progress", assignee: "u_editor", due: 2, order: 0, versions: 2, visible: true },
+  { id: "t2", sg: "sg_reels", title: "Caption + hashtag pack", status: "revisions", assignee: "u_editor2", due: 1, order: 1, versions: 3, visible: true },
+  { id: "t3", sg: "sg_reels", title: "Music licensing check", status: "backlog", assignee: "u_editor", due: 5, order: 2, versions: 0, visible: false },
+  { id: "t4", sg: "sg_yt", title: "Cutdown captions (EN/ES)", status: "approved", assignee: "u_editor2", due: -1, order: 0, versions: 2, visible: true },
   { id: "t5", sg: "sg_yt", title: "30s Cutdown", status: "done", assignee: "u_editor", due: -3, order: 1, versions: 1, visible: true },
   { id: "t6", sg: "sg_hero", title: "Hero Film — Grade", status: "in_progress", assignee: "u_editor2", due: 4, order: 0, versions: 1, visible: false },
   { id: "t7", sg: "sg_hero", title: "Hero Film — Sound mix", status: "blocked", assignee: "u_editor", due: 7, order: 1, versions: 0, visible: false, blockedReason: "Waiting on VO stems from the client's audio vendor." },
@@ -212,7 +216,7 @@ const TASKS = [
   { id: "t9", sg: "sg_tiktok", title: "TikTok 02 — Trend cut", status: "in_progress", assignee: "u_editor2", due: 3, order: 1, versions: 1, visible: true },
   { id: "t10", sg: "sg_gifs", title: "Newsletter GIF pack", status: "delivered", assignee: "u_editor2", due: -2, order: 0, versions: 1, visible: false, deliveryNote: "Final pack delivered via Drive folder → Marketing/GIFs, handed to Sam." },
   // Northlight Post — the shared contractor (u_editor) has work in BOTH orgs.
-  { id: "t11", sg: "sg_spots", title: "Spot 01 — Roast reveal", status: "in_progress", assignee: "u_editor", due: 3, order: 0, versions: 1, visible: true },
+  { id: "t11", sg: "sg_spots", title: "Roast reveal mood board", status: "in_progress", assignee: "u_editor", due: 3, order: 0, versions: 1, visible: true },
   { id: "t12", sg: "sg_spots", title: "Spot 02 — Barista story", status: "backlog", assignee: "u_editor", due: 6, order: 1, versions: 0, visible: false },
   { id: "t13", sg: "sg_spots", title: "Spot 03 — Grand opening", status: "revisions", assignee: "u_north", due: 1, order: 2, versions: 2, visible: true },
 ];
@@ -230,6 +234,30 @@ function stagesFor(d) {
 function clientOf(projectId) {
   return PROJECTS.find((p) => p.id === projectId).clientId;
 }
+
+// One plan per deliverable for its stage-tasks: stage, status, assignee, due.
+// Single source of truth for BOTH the stage-task docs and the deliverable's
+// stageSummary — in production the onTaskWrite trigger keeps the summary
+// mirroring the tasks, so seeding them from separate data would ship a
+// drifted summary the portal renders from.
+const STAGE_STATUSES = ["done", "done", "in_progress", "backlog", "backlog"];
+const STAGE_ASSIGNEES = ["u_editor", "u_editor", "u_editor2", "u_editor2", "u_editor"];
+function stageTaskPlan(d) {
+  const stages = stagesFor(d);
+  const stageDue = stageDueDates(stages, dueDay(d.dueInDays), "end");
+  return stages.map((stage, si) => ({
+    stage,
+    si,
+    // For delivered deliverables, all stages are done.
+    status: d.status === "delivered" ? "done" : STAGE_STATUSES[si],
+    assignee: d.orgId === "o_northlight" ? "u_editor" : STAGE_ASSIGNEES[si],
+    dueAt: stageDue[si],
+  }));
+}
+
+// Demo media link for a cut — pasdiu.com placeholders so every "Watch"
+// affordance (portal latest-cut button, per-version links) is exercisable.
+const cutUrl = (id, v) => `https://pasdiu.com/cuts/${id}-v${v}`;
 
 // Default deliverable types seeded per org.
 const DELIVERABLE_TYPES = [
@@ -308,7 +336,9 @@ const SESSIONS = [
     date: days(3),
     startsAt: days(3),
     endsAt: days(3),
-    taskIds: ["t1", "t2"],
+    // Shoots record CAPTURE-stage tasks of deliverables — that's what a
+    // session's task list means in the deliverable model.
+    taskIds: ["del_1_s_capture", "del_2_s_capture"],
     notes: "Bring extra lighting kits. Talent arrives at 9 AM.",
   },
   {
@@ -334,7 +364,7 @@ const SESSIONS = [
     date: days(7),
     startsAt: days(7),
     endsAt: days(7),
-    taskIds: ["t11"],
+    taskIds: ["del_5_s_capture"],
     notes: "Barista consent forms needed.",
   },
 ];
@@ -398,14 +428,26 @@ async function seedData() {
       subGroupName: d.subGroupName,
       typeId: d.typeId,
       stages: DEFAULT_STAGES,
-      stageSummary: [],
+      // Mirrors the stage-tasks seeded below (same plan) — the portal and the
+      // contact profile render stage progress from this projection, so an
+      // empty summary would demo as "no progress" until a task write happens
+      // to fire the healing trigger.
+      stageSummary: stageTaskPlan(d).map(({ stage, status, assignee, dueAt }) => ({
+        stageId: stage.id,
+        name: stage.name,
+        status,
+        assigneeUid: assignee,
+        assigneeName: userByUid(assignee).name,
+        dueAt,
+      })),
       name: d.name,
       status: d.status,
       // Mostly "normal" so the priority chip stays an exception, with one of
       // each extreme to exercise the sort.
       priority: d.priority ?? "normal",
       clientVisible: d.clientVisible,
-      latestVersionUrl: "",
+      // The portal's "Watch the latest cut" button — pasdiu.com placeholder.
+      latestVersionUrl: d.versions > 0 ? cutUrl(d.id, d.versions) : "",
       order: d.order,
       meta: [],
       createdAt: days(-10),
@@ -427,7 +469,9 @@ async function seedData() {
         label: `v${v}`,
         note: v === d.versions ? "Latest version for review." : "Superseded.",
         createdAt: days(-d.versions + v - 1),
-        mediaUrl: "",
+        // Every deliverable version is watchable — superseded cuts stay
+        // reviewable in real workflows too.
+        mediaUrl: cutUrl(d.id, v),
       });
     }
     // Add a feedback note on the latest version for deliverables with versions.
@@ -451,16 +495,8 @@ async function seedData() {
   // off each deliverable's anchor — so the demo shows the real per-stage
   // schedule instead of an invented ladder that would drift from production.
   const stBatch = db.batch();
-  const stageStatuses = ["done", "done", "in_progress", "backlog", "backlog"];
-  const stageAssignees = ["u_editor", "u_editor", "u_editor2", "u_editor2", "u_editor"];
   for (const d of DELIVERABLES) {
-    const stages = stagesFor(d);
-    const stageDue = stageDueDates(stages, dueDay(d.dueInDays), "end");
-    for (let si = 0; si < stages.length; si++) {
-      const stage = stages[si];
-      // For delivered deliverables, all stages are done.
-      const status = d.status === "delivered" ? "done" : stageStatuses[si];
-      const assignee = d.orgId === "o_northlight" ? "u_editor" : stageAssignees[si];
+    for (const { stage, si, status, assignee, dueAt } of stageTaskPlan(d)) {
       const taskId = `${d.id}_${stage.id}`;
       const done = status === "done" || status === "approved" || status === "delivered";
       stBatch.set(db.doc(`tasks/${taskId}`), {
@@ -472,13 +508,17 @@ async function seedData() {
         clientId: d.clientId,
         status,
         assigneeUid: assignee,
-        clientVisible: false,
+        // The pipeline itself says which stages the client participates in
+        // (Review/Approval are clientFacing) — those stage-tasks are shared
+        // whenever the deliverable is, so the portal's stage chips link into
+        // the Iteration Room like they do for real batch-created work.
+        clientVisible: stage.clientFacing === true && d.clientVisible === true,
         blockedReason: "",
         blockedAt: null,
         deliveryNote: "",
         meta: [],
         order: si,
-        dueAt: stageDue[si],
+        dueAt,
         createdAt: days(-10),
         completedAt: done ? days(-5 + si) : null,
         deliverableId: d.id,
@@ -530,7 +570,9 @@ async function seedData() {
         label: `v${v}`,
         note: v === t.versions ? "Latest cut for review." : "Superseded.",
         createdAt: days(-t.versions + v - 1),
-        mediaUrl: "", // placeholder — Iteration Room shows a poster block when empty
+        // Latest cut gets a pasdiu.com placeholder link; superseded ones stay
+        // empty so the Iteration Room's no-media poster block stays demoable.
+        mediaUrl: v === t.versions ? cutUrl(t.id, v) : "",
       });
     }
     if (t.versions >= 1) {

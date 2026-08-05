@@ -302,11 +302,26 @@ Added by the load-pattern fixes (all in `firestore.indexes.json`):
 - tasks by `orgId` + `assigneeUid` + `status` — the per-member active-count
   aggregation. `count()` has the same index requirements as the query it
   counts.
-- tasks by `orgId` + `status` + `dueAt`, `orgId` + `assigneeUid` + `dueAt`,
-  and `orgId` + `assigneeUid` + `status` + `dueAt` — All Tasks' server-side
-  filter fallback. When the org outgrows the live window and a filter is
-  active, the page queries the filter combo directly (paged by `dueAt`)
-  instead of filtering an incomplete window client-side.
+- tasks by `orgId` + `status` + `dueAt` — the Task Queue's server-side
+  fallback. When the org outgrows the live window and a status cut is active,
+  the page queries `status in [...]` directly (paged by `dueAt`) instead of
+  filtering an incomplete window client-side. `in` is a disjunction of
+  equalities, so this one index also serves the aggregate "In Review" cut.
+  (The queue is status-only by design: per-person lives on the team member
+  page via the assigned-tasks listener, per-client on the client page — so
+  no assignee-flavored composites exist.)
+
+Added by the Schedule page + ICS calendar feed (`routes/calendar.ts`):
+
+- tasks by `orgId` + `dueAt` — manager schedule/feed range queries. This one
+  was ALREADY needed: CalendarPage's month query has used it since phase 4
+  with no index entry, passing in the emulator (which doesn't enforce
+  indexes) and destined to throw `FAILED_PRECONDITION` in production.
+- tasks by `orgId` + `assigneeUid` + `dueAt` — contractor schedule/feed.
+- sessions by `orgId` + `date` — schedule + CalendarPage month queries (the
+  existing `orgId`+`projectId`+`date` composite cannot serve them: `projectId`
+  sits between the two fields, so the prefix doesn't match). Same latent
+  phase-4 production bug, same fix.
 
 **Priority needs no index.** Deliverable priority is sorted in memory on the
 board and in the portal, both of which already hold the full set they render.
