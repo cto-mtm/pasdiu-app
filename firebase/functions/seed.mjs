@@ -439,6 +439,10 @@ async function seedData() {
         assigneeUid: assignee,
         assigneeName: userByUid(assignee).name,
         dueAt,
+        // Mirror the stage-task docs below: deterministic id, and shared
+        // with the client only on clientFacing stages of visible work.
+        taskId: `${d.id}_${stage.id}`,
+        clientVisible: stage.clientFacing === true && d.clientVisible === true,
       })),
       name: d.name,
       status: d.status,
@@ -448,6 +452,7 @@ async function seedData() {
       clientVisible: d.clientVisible,
       // The portal's "Watch the latest cut" button — pasdiu.com placeholder.
       latestVersionUrl: d.versions > 0 ? cutUrl(d.id, d.versions) : "",
+      latestVersionLabel: d.versions > 0 ? `v${d.versions}` : "",
       order: d.order,
       meta: [],
       createdAt: days(-10),

@@ -152,68 +152,21 @@ deliverablesRouter.post(
 
       // One deadline per stage, chained off this deliverable's own anchor.
       const stageDue = stageDueDates(stages, anchorDates[i], input.scheduleMode);
-      const dueByStageId = new Map(stages.map((s, si): [string, Date | null] => [s.id, stageDue[si]]));
 
-      // Round-robin assignee for a stage of deliverable i — shared by the
-      // summary prefill and the task docs so the two can't drift.
-      const assigneeFor = (stageId: string): string => {
-        const stageAssignees = input.stageAssignees?.[stageId] ?? [];
-        return stageAssignees.length > 0 ? stageAssignees[i % stageAssignees.length] : "";
-      };
+      // One task per stage — built before the deliverable doc so the
+      // stageSummary prefill below can carry each task's id.
+      const taskOps: typeof ops = stages.map((stage, si) => {
+        // Round-robin assignee for this stage.
+        const stageAssignees = input.stageAssignees?.[stage.id] ?? [];
+        const assigneeUid = stageAssignees.length > 0
+          ? stageAssignees[i % stageAssignees.length]
+          : "";
 
-      ops.push({
-        ref: delRef,
-        data: {
-          orgId,
-          clientId,
-          projectId: input.projectId,
-          subGroupId,
-          subGroupName,
-          typeId: input.typeId ?? "",
-          stages: pipeline.stages, // full snapshot
-          // Prefill mirroring exactly what rebuildStageSummary derives from
-          // the tasks written below (all backlog; skipped stages read as
-          // untouched backlog with no task) — so board rows render assignees
-          // immediately and the trigger's first rebuild is a no-op rewrite.
-          stageSummary: pipeline.stages.map((stage) => {
-            const assigneeUid = skipSet.has(stage.id) ? "" : assigneeFor(stage.id);
-            return {
-              stageId: stage.id,
-              name: stage.name,
-              status: "backlog",
-              assigneeUid,
-              assigneeName: summaryNames.get(assigneeUid) ?? "",
-              dueAt: dueByStageId.get(stage.id) ?? null,
-            };
-          }),
-          name: input.names[i],
-          status: "active",
-          // The whole batch shares one priority; individual deliverables are
-          // re-prioritised afterwards from the board. The schema defaults this
-          // to "normal", and the ?? keeps the write valid anyway — Firestore
-          // rejects an explicit `undefined`, so a missing default would 500 the
-          // entire batch rather than degrade.
-          priority: input.priority ?? "normal",
-          clientVisible: input.clientVisible ?? false,
-          latestVersionUrl: "",
-          order: i,
-          meta: [],
-          createdAt: FieldValue.serverTimestamp(),
-          deliveredAt: null,
-        },
-      });
-
-      // One task per stage.
-      for (let si = 0; si < stages.length; si++) {
-        const stage = stages[si];
-        const assigneeUid = assigneeFor(stage.id);
-
-        const taskRef = db.collection("tasks").doc();
-        ops.push({
-          ref: taskRef,
+        return {
+          ref: db.collection("tasks").doc(),
           data: {
             orgId,
-            title: `${stages[si].name}: ${input.names[i]}`,
+            title: `${stage.name}: ${input.names[i]}`,
             description: "",
             subGroupId,
             projectId: input.projectId,
@@ -232,8 +185,51 @@ deliverablesRouter.post(
             deliverableId: delRef.id,
             stageId: stage.id,
           },
-        });
-      }
+        };
+      });
+
+      ops.push({
+        ref: delRef,
+        data: {
+          orgId,
+          clientId,
+          projectId: input.projectId,
+          subGroupId,
+          subGroupName,
+          typeId: input.typeId ?? "",
+          stages: pipeline.stages, // full snapshot
+          // Prefilled so the portal/board render stage progress immediately;
+          // the onTaskWrite trigger maintains it from here (and rebuilds to
+          // exactly this shape — skipped stages get no entry either way, and
+          // assigneeName resolves from the same member docs the rebuild uses).
+          stageSummary: stages.map((stage, si) => ({
+            stageId: stage.id,
+            name: stage.name,
+            status: "backlog",
+            assigneeUid: taskOps[si].data.assigneeUid,
+            assigneeName: summaryNames.get(taskOps[si].data.assigneeUid as string) ?? "",
+            dueAt: stageDue[si],
+            taskId: taskOps[si].ref.id,
+            clientVisible: false,
+          })),
+          name: input.names[i],
+          status: "active",
+          // The whole batch shares one priority; individual deliverables are
+          // re-prioritised afterwards from the board. The schema defaults this
+          // to "normal", and the ?? keeps the write valid anyway — Firestore
+          // rejects an explicit `undefined`, so a missing default would 500 the
+          // entire batch rather than degrade.
+          priority: input.priority ?? "normal",
+          clientVisible: input.clientVisible ?? false,
+          latestVersionUrl: "",
+          latestVersionLabel: "",
+          order: i,
+          meta: [],
+          createdAt: FieldValue.serverTimestamp(),
+          deliveredAt: null,
+        },
+      });
+      ops.push(...taskOps);
     }
 
     // Write in chunks.

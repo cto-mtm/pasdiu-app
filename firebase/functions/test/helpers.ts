@@ -295,6 +295,7 @@ export async function seedDeliverable(orgId: string, id: string, over: Doc = {})
         priority: "normal",
         clientVisible: false,
         latestVersionUrl: "",
+        latestVersionLabel: "",
         order: 0,
         meta: [],
         createdAt: new Date(),
@@ -303,6 +304,28 @@ export async function seedDeliverable(orgId: string, id: string, over: Doc = {})
         approvedVia: "",
         approvedAt: null,
         approvalNote: "",
+        ...over,
+      })
+    );
+}
+
+/**
+ * Version doc under deliverables/{deliverableId}/versions (shape mirrors the
+ * app's addDeliverableVersion in app/src/stores/data.ts).
+ */
+export async function seedDeliverableVersion(
+  deliverableId: string,
+  id: string,
+  over: Doc = {}
+): Promise<void> {
+  await getFirestore()
+    .doc(`deliverables/${deliverableId}/versions/${id}`)
+    .set(
+      withoutUndefined({
+        label: id,
+        note: "",
+        mediaUrl: `https://pasdiu.com/cuts/${deliverableId}-${id}`,
+        createdAt: new Date(),
         ...over,
       })
     );
