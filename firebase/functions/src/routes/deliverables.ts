@@ -13,6 +13,7 @@ import {
   parseDueDate,
   stageDueDates,
 } from "@pasdiu/shared";
+import { resolveMemberNames } from "../helpers/deliverableProjections.js";
 
 export const deliverablesRouter = express.Router();
 
@@ -131,6 +132,15 @@ deliverablesRouter.post(
       anchorDates = new Array(count).fill(windowEnd);
     }
 
+    // Assignee display names for the stageSummary prefill below — resolved
+    // once for the whole batch from the org's member docs (non-member or
+    // unknown uids resolve to "", never to another org's name).
+    const summaryNames = await resolveMemberNames(
+      db,
+      orgId,
+      Object.values(input.stageAssignees ?? {}).flat()
+    );
+
     // Build all documents.
     const createdDeliverableIds: string[] = [];
     const BATCH_LIMIT = 400; // Leave room under Firestore's 500-op cap.
@@ -142,6 +152,14 @@ deliverablesRouter.post(
 
       // One deadline per stage, chained off this deliverable's own anchor.
       const stageDue = stageDueDates(stages, anchorDates[i], input.scheduleMode);
+      const dueByStageId = new Map(stages.map((s, si) => [s.id, stageDue[si]]));
+
+      // Round-robin assignee for a stage of deliverable i — shared by the
+      // summary prefill and the task docs so the two can't drift.
+      const assigneeFor = (stageId: string): string => {
+        const stageAssignees = input.stageAssignees?.[stageId] ?? [];
+        return stageAssignees.length > 0 ? stageAssignees[i % stageAssignees.length] : "";
+      };
 
       ops.push({
         ref: delRef,
@@ -153,7 +171,21 @@ deliverablesRouter.post(
           subGroupName,
           typeId: input.typeId ?? "",
           stages: pipeline.stages, // full snapshot
-          stageSummary: [], // trigger will fill on first task write
+          // Prefill mirroring exactly what rebuildStageSummary derives from
+          // the tasks written below (all backlog; skipped stages read as
+          // untouched backlog with no task) — so board rows render assignees
+          // immediately and the trigger's first rebuild is a no-op rewrite.
+          stageSummary: pipeline.stages.map((stage) => {
+            const assigneeUid = skipSet.has(stage.id) ? "" : assigneeFor(stage.id);
+            return {
+              stageId: stage.id,
+              name: stage.name,
+              status: "backlog",
+              assigneeUid,
+              assigneeName: summaryNames.get(assigneeUid) ?? "",
+              dueAt: dueByStageId.get(stage.id) ?? null,
+            };
+          }),
           name: input.names[i],
           status: "active",
           // The whole batch shares one priority; individual deliverables are
@@ -174,11 +206,7 @@ deliverablesRouter.post(
       // One task per stage.
       for (let si = 0; si < stages.length; si++) {
         const stage = stages[si];
-        // Round-robin assignee for this stage.
-        const stageAssignees = input.stageAssignees?.[stage.id] ?? [];
-        const assigneeUid = stageAssignees.length > 0
-          ? stageAssignees[i % stageAssignees.length]
-          : "";
+        const assigneeUid = assigneeFor(stage.id);
 
         const taskRef = db.collection("tasks").doc();
         ops.push({

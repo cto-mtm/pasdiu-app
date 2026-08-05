@@ -14,6 +14,7 @@
 import { describe, it, beforeEach } from "vitest";
 import assert from "node:assert/strict";
 import { getFirestore } from "firebase-admin/firestore";
+import { rebuildStageSummary } from "../src/helpers/deliverableProjections.js";
 import {
   post, postAnon, clearFirestore, makeUserToken,
   seedOrg, seedMember, seedUsage, seedClient,
@@ -174,6 +175,24 @@ describe("POST /orgs/:orgId/deliverables/batch", () => {
     const stages = del0.get("stages") as unknown[];
     assert.equal(stages.length, 3);
 
+    // stageSummary prefilled with assignee display names resolved from member
+    // docs — board rows render names immediately, without a member lookup and
+    // without waiting for the onTaskWrite trigger.
+    const summary0 = del0.get("stageSummary") as Array<Record<string, unknown>>;
+    assert.equal(summary0.length, 3);
+    assert.equal(summary0[0].stageId, "s_capture");
+    assert.equal(summary0[0].status, "backlog");
+    assert.equal(summary0[0].assigneeUid, "u-contractor");
+    assert.equal(summary0[0].assigneeName, "Test u-contractor"); // seedMember default
+    // Unassigned stage (no stageAssignees entry for s_review).
+    assert.equal(summary0[2].assigneeUid, "");
+    assert.equal(summary0[2].assigneeName, "");
+    // Round-robin lands u-mgr on Video 2's edit stage — name follows the uid.
+    const del1 = delSnap.docs.find((d) => d.get("name") === "Video 2")!;
+    const summary1 = del1.get("stageSummary") as Array<Record<string, unknown>>;
+    assert.equal(summary1[1].assigneeUid, "u-mgr");
+    assert.equal(summary1[1].assigneeName, "Test u-mgr");
+
     // Tasks created (3 stages × 3 deliverables = 9).
     const taskSnap = await db.collection("tasks").where("orgId", "==", ORG).get();
     assert.equal(taskSnap.size, 9);
@@ -298,6 +317,41 @@ describe("POST /orgs/:orgId/deliverables/batch", () => {
     assert.ok(stageIds.includes("s_capture"));
     assert.ok(stageIds.includes("s_edit"));
     assert.ok(!stageIds.includes("s_review"));
+
+    // The summary still spans the FULL stage snapshot: the skipped stage
+    // reads as untouched backlog (exactly what a rebuild derives from its
+    // missing task), not as a missing entry.
+    const delSnap = await db.doc(`deliverables/${res.body.deliverableIds[0]}`).get();
+    const summary = delSnap.get("stageSummary") as Array<Record<string, unknown>>;
+    assert.equal(summary.length, 3);
+    assert.deepEqual(summary[2], {
+      stageId: "s_review", name: "Review", status: "backlog",
+      assigneeUid: "", assigneeName: "", dueAt: null,
+    });
+  });
+
+  it("stageSummary prefill is byte-identical to a trigger rebuild", async () => {
+    // The onTaskWrite trigger rebuilds the summary from the tasks on every
+    // stage transition; if the endpoint's prefill drifted from that shape,
+    // the first transition would silently rewrite what the board renders.
+    const res = await post(`/orgs/${ORG}/deliverables/batch`, mgrToken, {
+      projectId: PROJECT,
+      subGroupId: "sg-batch",
+      names: ["Parity 1", "Parity 2"],
+      stageAssignees: { s_capture: ["u-contractor"], s_edit: ["u-contractor", "u-mgr"] },
+      dueEndAt: "2026-08-15",
+    });
+    assert.equal(res.status, 201);
+
+    const db = getFirestore();
+    for (const id of res.body.deliverableIds as string[]) {
+      const ref = db.doc(`deliverables/${id}`);
+      const prefill = (await ref.get()).get("stageSummary");
+      const result = await rebuildStageSummary(db, id);
+      assert.deepEqual(result, { stageCount: 3 });
+      const rebuilt = (await ref.get()).get("stageSummary");
+      assert.deepEqual(rebuilt, prefill);
+    }
   });
 
   // ── Stage scheduling ──────────────────────────────────────────────────────
