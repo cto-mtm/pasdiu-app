@@ -85,6 +85,11 @@ export const useAuthStore = defineStore('auth', () => {
   // app shell between login and first paint.
   const transitioning = ref(false)
 
+  // True once the initial onAuthStateChanged callback has resolved. Until then
+  // we don't know if the user has a session — the app shows the full-page
+  // loader rather than a black screen.
+  const initialized = ref(false)
+
   // Pending invites addressed to this account's email (checked at login).
   // Consumed by the welcome/onboarding page and by any in-app banner.
   const pendingInvites = ref<PendingInvite[]>([])
@@ -382,6 +387,7 @@ export const useAuthStore = defineStore('auth', () => {
         // A persisted unverified session (shouldn't normally exist — login
         // rejects these): end it without re-sending mail to avoid spam loops.
         await fbSignOut(auth)
+        initialized.value = true
         resolve()
         return
       }
@@ -390,6 +396,7 @@ export const useAuthStore = defineStore('auth', () => {
       } else {
         await clearSession()
       }
+      initialized.value = true
       resolve()
     })
   })
@@ -561,6 +568,7 @@ export const useAuthStore = defineStore('auth', () => {
     profile,
     error,
     ready,
+    initialized,
     transitioning,
     isAuthed,
     role,

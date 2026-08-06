@@ -63,10 +63,9 @@ watch(
 </script>
 
 <template>
-  <!-- Full-page loader: covers the gap between a successful login and the
-       landing page's initial data arriving. Dismissed once the first chrome
-       route settles (data.loadWorkspace resolves on mount). -->
-  <FullPageLoader v-if="auth.transitioning" />
+  <!-- Full-page loader: shown during initial auth check (hard refresh on a
+       deep URL) or during the post-login transition until data arrives. -->
+  <FullPageLoader v-if="!auth.initialized || auth.transitioning" />
 
   <!-- The chrome'd RouterView is keyed on the active org so switching orgs
        remounts the page even when the route itself doesn't change (otherwise
@@ -78,6 +77,6 @@ watch(
   <RouterView v-else />
   <!-- First-login tour: chrome-only, so the /welcome funnel and other bare
        routes never see it; it opens once the user lands in a workspace. -->
-  <OnboardingTour v-if="chrome && !auth.transitioning" />
+  <OnboardingTour v-if="chrome && auth.initialized && !auth.transitioning" />
   <Toaster />
 </template>
