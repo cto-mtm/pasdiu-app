@@ -5,14 +5,7 @@ import type { OrgUsage, Plan } from '../lib/types'
 
 // The gate that triggered an upsell — flows into UpsellModal and the
 // /pricing deep link (?reason=…).
-export type GateReason = 'clients' | 'tasks' | 'seats' | 'feature'
-
-// Numeric limits from the org doc, keyed like the gates. -1 = unlimited.
-export interface PlanLimits {
-  seats: number
-  clients: number
-  tasks: number
-}
+export type GateReason = 'clients' | 'tasks' | 'seats' | 'deliverables' | 'feature'
 
 // Fail OPEN when either side is unknown (org/usage docs still loading):
 // the UI never blocks on missing data — Firestore rules are the backstop
@@ -31,10 +24,11 @@ function underLimit(used: number | undefined, limit: number | undefined): boolea
  */
 export function useEntitlements(): {
   plan: ComputedRef<Plan>
-  limits: ComputedRef<PlanLimits | null>
+  limits: ComputedRef<{ seats: number; clients: number; tasks: number; deliverables: number } | null>
   usage: ComputedRef<OrgUsage | null>
   canCreateClient: ComputedRef<boolean>
   canCreateTask: ComputedRef<boolean>
+  canCreateDeliverable: ComputedRef<boolean>
   canInvite: ComputedRef<boolean>
   has: (feature: PlanFeature) => boolean
 } {
@@ -42,9 +36,9 @@ export function useEntitlements(): {
 
   const plan = computed<Plan>(() => auth.org?.plan ?? 'free')
 
-  const limits = computed<PlanLimits | null>(() =>
+  const limits = computed(() =>
     auth.org
-      ? { seats: auth.org.seatLimit, clients: auth.org.clientLimit, tasks: auth.org.taskLimit }
+      ? { seats: auth.org.seatLimit, clients: auth.org.clientLimit, tasks: auth.org.taskLimit, deliverables: auth.org.deliverableLimit }
       : null,
   )
 
@@ -52,6 +46,7 @@ export function useEntitlements(): {
 
   const canCreateClient = computed(() => underLimit(auth.usage?.activeClients, auth.org?.clientLimit))
   const canCreateTask = computed(() => underLimit(auth.usage?.activeTasks, auth.org?.taskLimit))
+  const canCreateDeliverable = computed(() => underLimit(auth.usage?.activeDeliverables, auth.org?.deliverableLimit))
   const canInvite = computed(() => underLimit(auth.usage?.seats, auth.org?.seatLimit))
 
   // Feature flags by plan. Fails open while the org doc loads (null → true)
@@ -67,6 +62,7 @@ export function useEntitlements(): {
     usage,
     canCreateClient,
     canCreateTask,
+    canCreateDeliverable,
     canInvite,
     has,
   }

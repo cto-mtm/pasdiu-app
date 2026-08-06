@@ -40,92 +40,42 @@ import notFound from './locales/pages/not-found'
 export const SUPPORTED_LOCALES = ['en', 'es'] as const
 export type Locale = (typeof SUPPORTED_LOCALES)[number]
 
+// ── Module registry ─────────────────────────────────────────────
+// Adding a new i18n module = one line here. Both en and es are built
+// automatically from this registry — no duplicate assembly block.
+const modules = {
+  common, roles, status, actions, meta,
+  shell, search, brief, batchCreate, workflow, packages,
+  import: importMessages, tour,
+  auth, onboarding, invite, dashboard, client, board, calendar,
+  deliverableDetail: deliverable, iteration, slate, schedule,
+  portal, ledger, team, analytics, allTasks, settings, billing, pricing,
+  'not-found': notFound,
+} as const
+
+type ModuleKey = keyof typeof modules
+
 // en is the source of truth; es is typed against it inside each module.
 const messages = {
-  en: {
-    common: common.en,
-    roles: roles.en,
-    status: status.en,
-    actions: actions.en,
-    meta: meta.en,
-    shell: shell.en,
-    search: search.en,
-    brief: brief.en,
-    batchCreate: batchCreate.en,
-    workflow: workflow.en,
-    packages: packages.en,
-    import: importMessages.en,
-    tour: tour.en,
-    auth: auth.en,
-    onboarding: onboarding.en,
-    invite: invite.en,
-    dashboard: dashboard.en,
-    client: client.en,
-    board: board.en,
-    calendar: calendar.en,
-    deliverableDetail: deliverable.en,
-    iteration: iteration.en,
-    slate: slate.en,
-    schedule: schedule.en,
-    portal: portal.en,
-    ledger: ledger.en,
-    team: team.en,
-    analytics: analytics.en,
-    allTasks: allTasks.en,
-    settings: settings.en,
-    billing: billing.en,
-    pricing: pricing.en,
-    'not-found': notFound.en,
-  },
-  es: {
-    common: common.es,
-    roles: roles.es,
-    status: status.es,
-    actions: actions.es,
-    meta: meta.es,
-    shell: shell.es,
-    search: search.es,
-    brief: brief.es,
-    batchCreate: batchCreate.es,
-    workflow: workflow.es,
-    packages: packages.es,
-    import: importMessages.es,
-    tour: tour.es,
-    auth: auth.es,
-    onboarding: onboarding.es,
-    invite: invite.es,
-    dashboard: dashboard.es,
-    client: client.es,
-    board: board.es,
-    calendar: calendar.es,
-    deliverableDetail: deliverable.es,
-    iteration: iteration.es,
-    slate: slate.es,
-    schedule: schedule.es,
-    portal: portal.es,
-    ledger: ledger.es,
-    team: team.es,
-    analytics: analytics.es,
-    allTasks: allTasks.es,
-    settings: settings.es,
-    billing: billing.es,
-    pricing: pricing.es,
-    'not-found': notFound.es,
-  },
+  en: Object.fromEntries(
+    Object.entries(modules).map(([k, m]) => [k, m.en]),
+  ) as { [K in ModuleKey]: (typeof modules)[K]['en'] },
+  es: Object.fromEntries(
+    Object.entries(modules).map(([k, m]) => [k, m.es]),
+  ) as { [K in ModuleKey]: (typeof modules)[K]['es'] },
 }
 
+// Datetime formats — identical across locales for now. When Spanish needs a
+// divergent format, override just that key in the es spread.
+const baseDatetimeFormats = {
+  short: { year: 'numeric', month: 'short', day: 'numeric' },
+  monthYear: { year: 'numeric', month: 'long' },
+  weekday: { weekday: 'long', month: 'long', day: 'numeric' },
+} as const
+
 const datetimeFormats = {
-  en: {
-    short: { year: 'numeric', month: 'short', day: 'numeric' },
-    // Week-strip header ("August 2026") and long day headings (Schedule).
-    monthYear: { year: 'numeric', month: 'long' },
-    weekday: { weekday: 'long', month: 'long', day: 'numeric' },
-  },
-  es: {
-    short: { year: 'numeric', month: 'short', day: 'numeric' },
-    monthYear: { year: 'numeric', month: 'long' },
-    weekday: { weekday: 'long', month: 'long', day: 'numeric' },
-  },
+  en: baseDatetimeFormats,
+  es: baseDatetimeFormats,
 } as const
 
 export const i18n = createI18n({

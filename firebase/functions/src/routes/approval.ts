@@ -7,12 +7,15 @@ import {
   userOf,
   MANAGER_ROLES,
 } from "../helpers/apiErrors.js";
+import { getMembershipOrThrow } from "../helpers/membership.js";
 
 export const approvalRouter = express.Router();
 
 approvalRouter.use(requireAuth);
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────
+
+const MAX_BULK_APPROVE = 50;
 
 async function getDeliverableOrThrow(db: FirebaseFirestore.Firestore, orgId: string, deliverableId: string) {
   const snap = await db.doc(`deliverables/${deliverableId}`).get();
@@ -20,15 +23,6 @@ async function getDeliverableOrThrow(db: FirebaseFirestore.Firestore, orgId: str
   const data = snap.data()!;
   if (data.orgId !== orgId) throw new ApiError(403, "wrong_org");
   return { ref: snap.ref, data };
-}
-
-async function getMemberRole(db: FirebaseFirestore.Firestore, orgId: string, uid: string) {
-  const snap = await db.doc(`orgs/${orgId}/members/${uid}`).get();
-  if (!snap.exists) throw new ApiError(403, "not_a_member");
-  return {
-    role: snap.get("role") as string,
-    clientId: (snap.get("clientId") as string) ?? "",
-  };
 }
 
 // Terminal statuses — a task in any of these states is "done" for stage purposes.
@@ -64,14 +58,6 @@ async function findCurrentTask(db: FirebaseFirestore.Firestore, deliverableId: s
   return null;
 }
 
-// Advance the current stage task to 'approved' status.
-async function advanceApprovalTask(db: FirebaseFirestore.Firestore, deliverableId: string) {
-  const taskDoc = await findCurrentTask(db, deliverableId);
-  if (taskDoc) {
-    await taskDoc.ref.update({ status: "approved", completedAt: FieldValue.serverTimestamp() });
-  }
-}
-
 // ── POST /orgs/:orgId/deliverables/:deliverableId/approve ───────────────────
 approvalRouter.post(
   "/:orgId/deliverables/:deliverableId/approve",
@@ -80,7 +66,7 @@ approvalRouter.post(
     const { orgId, deliverableId } = req.params;
     const db = getFirestore();
 
-    const { role, clientId } = await getMemberRole(db, orgId, user.uid);
+    const { role, clientId } = await getMembershipOrThrow(db, orgId, user.uid);
     const { ref: delRef, data: del } = await getDeliverableOrThrow(db, orgId, deliverableId);
 
     let approvedVia: string;
@@ -100,18 +86,45 @@ approvalRouter.post(
       throw new ApiError(403, "unauthorized_role");
     }
 
-    // Write attribution — server-stamped, cannot be forged by the client SDK.
-    await delRef.update({
-      approvedBy: user.uid,
-      approvedVia,
-      approvedAt: FieldValue.serverTimestamp(),
-      approvalNote,
-      status: "delivered",
-      deliveredAt: FieldValue.serverTimestamp(),
-    });
+    // Transaction: deliverable status + task advancement are atomic.
+    await db.runTransaction(async (tx) => {
+      // ALL reads must happen before any writes in a Firestore transaction.
+      const [delDoc, tasksSnap] = await Promise.all([
+        tx.get(delRef),
+        tx.get(db.collection("tasks").where("deliverableId", "==", deliverableId)),
+      ]);
 
-    // Advance the current stage task.
-    await advanceApprovalTask(db, deliverableId);
+      // Determine the current stage task to advance.
+      const stages = (delDoc.data()?.stages ?? []) as Array<{ id: string }>;
+      const tasksByStageId = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
+      for (const taskDoc of tasksSnap.docs) {
+        const stageId = taskDoc.get("stageId") as string;
+        if (stageId) tasksByStageId.set(stageId, taskDoc);
+      }
+      let currentTask: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+      for (const stage of stages) {
+        const taskDoc = tasksByStageId.get(stage.id);
+        if (taskDoc && !isTerminal(taskDoc.get("status") as string)) {
+          currentTask = taskDoc;
+          break;
+        }
+      }
+
+      // NOW write: deliverable approval.
+      tx.update(delRef, {
+        approvedBy: user.uid,
+        approvedVia,
+        approvedAt: FieldValue.serverTimestamp(),
+        approvalNote,
+        status: "delivered",
+        deliveredAt: FieldValue.serverTimestamp(),
+      });
+
+      // Advance the current stage task.
+      if (currentTask) {
+        tx.update(currentTask.ref, { status: "approved", completedAt: FieldValue.serverTimestamp() });
+      }
+    });
 
     res.json({ deliverableId, approvedVia, approvedBy: user.uid });
   })
@@ -125,8 +138,8 @@ approvalRouter.post(
     const { orgId, deliverableId } = req.params;
     const db = getFirestore();
 
-    const { role, clientId } = await getMemberRole(db, orgId, user.uid);
-    const { ref: delRef, data: del } = await getDeliverableOrThrow(db, orgId, deliverableId);
+    const { role, clientId } = await getMembershipOrThrow(db, orgId, user.uid);
+    const { data: del } = await getDeliverableOrThrow(db, orgId, deliverableId);
 
     // Only clients can request changes.
     if (role !== "client") throw new ApiError(403, "client_only");
@@ -166,11 +179,18 @@ approvalRouter.post(
     const { orgId } = req.params;
     const db = getFirestore();
 
-    const { role, clientId } = await getMemberRole(db, orgId, user.uid);
+    const { role, clientId } = await getMembershipOrThrow(db, orgId, user.uid);
 
     const deliverableIds = req.body?.deliverableIds;
     if (!Array.isArray(deliverableIds) || deliverableIds.length === 0) {
       throw new ApiError(400, "deliverableIds_required");
+    }
+    // Validate: cap length and ensure every element is a string.
+    if (deliverableIds.length > MAX_BULK_APPROVE) {
+      throw new ApiError(400, "too_many_ids", { max: MAX_BULK_APPROVE });
+    }
+    if (!deliverableIds.every((id) => typeof id === "string" && id.length > 0)) {
+      throw new ApiError(400, "invalid_ids");
     }
 
     let approvedVia: string;
@@ -214,7 +234,12 @@ approvalRouter.post(
           deliveredAt: FieldValue.serverTimestamp(),
         });
 
-        await advanceApprovalTask(db, delId);
+        // Advance the associated task (best-effort — failure here doesn't
+        // roll back the approval; the trigger will heal it).
+        const taskDoc = await findCurrentTask(db, delId);
+        if (taskDoc) {
+          await taskDoc.ref.update({ status: "approved", completedAt: FieldValue.serverTimestamp() });
+        }
         results.push({ id: delId, ok: true });
       } catch {
         results.push({ id: delId, ok: false, error: "write_failed" });

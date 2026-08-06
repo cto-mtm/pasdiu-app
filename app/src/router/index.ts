@@ -5,8 +5,19 @@ import { PLAN_FEATURES, type PlanFeature } from '../lib/plans'
 import { track } from '../lib/analytics'
 import type { Role } from '../lib/types'
 
-// meta.roles: if present, only those roles may enter. meta.public: no auth.
-// meta.feature: if present, the active org's plan must include it (see guard).
+// ── Route meta type augmentation ────────────────────────────────
+declare module 'vue-router' {
+  interface RouteMeta {
+    public?: boolean
+    roles?: Role[]
+    feature?: PlanFeature
+  }
+}
+
+// Routes that are ALWAYS reachable regardless of auth state or workspace
+// membership — extracted so the guard doesn't repeat the check in two places.
+const ALWAYS_REACHABLE = new Set(['invite', 'pricing'])
+
 const routes: RouteRecordRaw[] = [
   { path: '/login', name: 'login', component: () => import('../pages/LoginPage.vue'), meta: { public: true } },
   // Public pricing page: reachable signed-out (marketing/upsell) AND signed-in
@@ -21,7 +32,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/invite/:orgId/:inviteId', name: 'invite', component: () => import('../pages/InvitePage.vue'), meta: { public: true } },
 
   // Role landing is resolved by the guard; '/' just triggers the redirect.
-  { path: '/', name: 'root', redirect: () => ({ name: 'login' }) },
+  { path: '/', name: 'root', component: () => import('../pages/LoginPage.vue') },
 
   // Manager (admin/pm) surfaces
   { path: '/dashboard', name: 'dashboard', component: () => import('../pages/DashboardPage.vue'), meta: { roles: ['admin', 'pm'] } },
@@ -32,8 +43,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/analytics', name: 'analytics', component: () => import('../pages/AnalyticsPage.vue'), meta: { roles: ['admin', 'pm'], feature: 'analytics' } },
   { path: '/ledger', name: 'ledger', component: () => import('../pages/LedgerPage.vue'), meta: { roles: ['admin', 'pm'], feature: 'ledger' } },
 
-  // Available to every signed-in role (includes the app→Cloud Function
-  // health-check diagnostics).
+  // Available to every signed-in role.
   { path: '/settings', name: 'settings', component: () => import('../pages/SettingsPage.vue') },
 
   // Boards + task views (managers + contractors)
@@ -46,8 +56,6 @@ const routes: RouteRecordRaw[] = [
   // Contractor + client surfaces
   { path: '/slate', name: 'slate', component: () => import('../pages/SlatePage.vue'), meta: { roles: ['contractor'] } },
   { path: '/portal', name: 'portal', component: () => import('../pages/ClientPortalPage.vue'), meta: { roles: ['client'] } },
-  // Client-facing deliverable detail — deliberately separate from the manager
-  // DeliverableDetailPage, whose reads the rules reject for the client role.
   { path: '/portal/:deliverableId', name: 'portal-deliverable', component: () => import('../pages/PortalDeliverablePage.vue'), meta: { roles: ['client'] } },
 
   { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('../pages/NotFoundPage.vue') },
@@ -69,10 +77,9 @@ router.beforeEach(async (to) => {
     return to.meta.public ? true : { name: 'login' }
   }
 
-  // Zero memberships: everything funnels into onboarding. The invite screen
-  // stays reachable — accepting one is how a first workspace can appear —
-  // and so is pricing (it doubles as the upgrade/marketing page).
-  if (auth.needsWorkspace && to.name !== 'welcome' && to.name !== 'invite' && to.name !== 'pricing') {
+  // Zero memberships: everything funnels into onboarding. Invite and pricing
+  // stay reachable.
+  if (auth.needsWorkspace && to.name !== 'welcome' && !ALWAYS_REACHABLE.has(to.name as string)) {
     return { name: 'welcome' }
   }
 
@@ -82,44 +89,30 @@ router.beforeEach(async (to) => {
   }
 
   // Signed-in users skip public routes (login) and land on their role home —
-  // except the invite screen (doubles as the signed-in accept flow) and the
-  // pricing page (doubles as the signed-in upgrade page).
-  if ((to.meta.public && to.name !== 'invite' && to.name !== 'pricing') || to.name === 'root') {
+  // except always-reachable routes.
+  if ((to.meta.public && !ALWAYS_REACHABLE.has(to.name as string)) || to.name === 'root') {
     return auth.homeRoute()
   }
 
   // Role gating.
-  const allowed = to.meta.roles as Role[] | undefined
-  if (allowed && auth.role && !allowed.includes(auth.role)) {
+  if (to.meta.roles && auth.role && !to.meta.roles.includes(auth.role)) {
     return auth.homeRoute()
   }
 
   // Plan gating (meta.feature): paid-plan surfaces redirect Free workspaces
-  // to Settings (their plan/upgrade page). The org doc loads async after
-  // navigation, so a null org ALLOWS — never block first paint on billing
-  // data; the nav hides these entries and rules protect the data anyway.
-  const feature = to.meta.feature as PlanFeature | undefined
-  if (feature && auth.org && !PLAN_FEATURES[auth.org.plan][feature]) {
+  // to Settings. Null org ALLOWS — never block first paint on billing data.
+  if (to.meta.feature && auth.org && !PLAN_FEATURES[auth.org.plan][to.meta.feature]) {
     return { name: 'settings' }
   }
   return true
 })
 
 // ── ANALYTICS ───────────────────────────────────────────────────
-// page_view on every settled navigation (posthog's automatic pageview is off:
-// it only sees full loads, not SPA routes). Safe ordering: initAnalytics()
-// runs in main.ts before app.mount(), and the first navigation only settles
-// during mount — so this can never fire before init. Route NAME only, never
-// the path/params (a path like /invite/:orgId/:inviteId leaks ids into a
-// third party; the name doesn't).
 router.afterEach((to) => {
   track('page_view', { name: to.name })
 })
 
 // ── VIEW TRANSITION WRAPPER ─────────────────────────────────────
-// Every navigation becomes a view transition when supported. Pages opt into
-// effects purely via CSS in assets/css/transitions.css. NEVER call
-// document.startViewTransition anywhere else.
 router.beforeResolve((_to, from) => {
   if (from === START_LOCATION) return
   if (!document.startViewTransition) return

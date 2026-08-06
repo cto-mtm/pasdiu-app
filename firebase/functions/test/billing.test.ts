@@ -172,7 +172,7 @@ describe("billing configured (fake keys): request gates", () => {
       interval: "month",
     });
     expect(res.status).toBe(403);
-    expect(res.body.error).toBe("Managers only");
+    expect(res.body.error).toBe("managers_only");
   });
 
   it("POST /billing/portal 409s no_customer when the org has no Stripe customer", async () => {

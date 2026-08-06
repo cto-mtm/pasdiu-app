@@ -5,7 +5,9 @@ import { apiFetch, type ApiError } from '../lib/api'
  * Reactive wrapper around apiFetch: exposes loading/error/data refs plus an
  * `execute()` that runs the request. `error` is a structured `{ key, params }`
  * i18n error (or null) — render it with `t(error.key, error.params)`.
- * Used by SettingsPage to call GET /health.
+ *
+ * `path` and `init` set the defaults; `execute()` accepts overrides for
+ * dynamic endpoints (e.g. `/orgs/${orgId}/...` where orgId changes).
  */
 export function useApi<T>(path: string, init?: RequestInit) {
   const data = shallowRef<T | null>(null)
@@ -16,11 +18,13 @@ export function useApi<T>(path: string, init?: RequestInit) {
   // write state, so an earlier slow response can't clobber a newer one.
   let requestId = 0
 
-  async function execute(): Promise<void> {
+  async function execute(overridePath?: string, overrideInit?: RequestInit): Promise<void> {
     const id = ++requestId
     loading.value = true
     error.value = null
-    const result = await apiFetch<T>(path, init)
+    const finalPath = overridePath ?? path
+    const finalInit = overrideInit ?? init
+    const result = await apiFetch<T>(finalPath, finalInit)
     if (id !== requestId) return
     if (result.ok) {
       data.value = result.data

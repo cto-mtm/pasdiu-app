@@ -9,8 +9,8 @@ import {
   asyncHandler,
   userOf,
   emailOf,
-  requireManagerOf,
 } from "../helpers/apiErrors.js";
+import { requireManagerAndGetOrg } from "../helpers/membership.js";
 import {
   handleStripeEvent,
   limitsOf,
@@ -79,17 +79,12 @@ billingRouter.post(
     const plan = req.body?.plan as PaidPlanId;
     const interval = req.body?.interval as BillingInterval;
     if (!orgId || !PAID_PLAN_IDS.includes(plan) || !BILLING_INTERVALS.includes(interval)) {
-      throw new ApiError(400, "orgId, plan ('studio'|'agency') and interval ('month'|'year') are required");
+      throw new ApiError(400, "invalid_body", "orgId, plan ('studio'|'agency') and interval ('month'|'year') are required");
     }
     if (!billingEnabled()) throw new ApiError(503, "billing_disabled");
 
     const db = getFirestore();
-    await requireManagerOf(db, orgId, user.uid);
-    const orgRef = db.doc(`orgs/${orgId}`);
-    // No usage read here: flat pricing means checkout never depends on the
-    // current seat count (see the quantity note below).
-    const orgSnap = await orgRef.get();
-    if (!orgSnap.exists) throw new ApiError(404, "Org not found");
+    const { ref: orgRef, snap: orgSnap } = await requireManagerAndGetOrg(db, orgId, user.uid);
 
     // Resolve the price BEFORE touching Stripe customers: an unresolved slot
     // used to reach Checkout as `price: ""` and surface as an opaque Stripe
@@ -132,13 +127,11 @@ billingRouter.post(
   asyncHandler(async (req, res) => {
     const user = userOf(req);
     const orgId = typeof req.body?.orgId === "string" ? req.body.orgId : "";
-    if (!orgId) throw new ApiError(400, "orgId is required");
+    if (!orgId) throw new ApiError(400, "orgId_required");
     if (!billingEnabled()) throw new ApiError(503, "billing_disabled");
 
     const db = getFirestore();
-    await requireManagerOf(db, orgId, user.uid);
-    const orgSnap = await db.doc(`orgs/${orgId}`).get();
-    if (!orgSnap.exists) throw new ApiError(404, "Org not found");
+    const { snap: orgSnap } = await requireManagerAndGetOrg(db, orgId, user.uid);
     const customerId = orgSnap.get("stripeCustomerId");
     if (typeof customerId !== "string" || !customerId) {
       throw new ApiError(409, "no_customer");

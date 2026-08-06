@@ -251,7 +251,8 @@ firebase emulators:exec --only firestore --project demo-app "npm test"
 
 Note on deletes: Firestore has no cascade — deleting a document does not delete
 its subcollections. The app deletes a task's `versions`/`notes` subcollection
-docs manually before the task doc (see `deleteTaskDeep` in `stores/data.ts`), per
+docs manually before the task doc (see `deleteTaskDeep` in
+`app/src/stores/data/deletes.ts`), per
 the [Firebase delete-data guidance](https://firebase.google.com/docs/firestore/manage-data/delete-data).
 For very large trees, prefer a trusted-server Cloud Function with the Admin SDK's
 `recursiveDelete()`.

@@ -213,7 +213,8 @@ From `CLAUDE.md`, non-negotiable:
   the item id, unique per page. Animate only `transform`/`opacity`, 200–350ms.
   All transition CSS lives in `app/src/assets/css/transitions.css` as numbered
   recipes. Read `docs/animations.md` first.
-- **Data access.** All Firestore access goes through `app/src/stores/data.ts`.
+- **Data access.** All Firestore access goes through the `data` store at
+  `app/src/stores/data/` (one slice per collection, composed in `index.ts`).
   Components never call the SDK directly. Doc→model conversion lives in
   `app/src/lib/mappers.ts`, which deliberately has no firebase imports.
 - **Builds.** Do not run `vite build`, `npm run build`, `cap sync`, or any

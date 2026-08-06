@@ -26,17 +26,22 @@ export const DISPLAY_PRICES = {
   agency: { priceMonthly: 149, priceAnnualTotal: 1490 },
 } as const satisfies Record<PaidPlanId, { priceMonthly: number; priceAnnualTotal: number }>
 
+/** @deprecated Use DISPLAY_PRICES directly. Alias kept for backward compat. */
 export const PLAN_PRICING = DISPLAY_PRICES
 
-// Display-only tier limits for pricing cards.
+// Display-only tier limits for pricing cards. DERIVED from PLAN_LIMITS so the
+// two can never drift apart.
 export const PLAN_DISPLAY_LIMITS: Record<
   Plan,
   { seats: number; clients: number; tasks: number; deliverables: number }
-> = {
-  free: { seats: 3, clients: 3, tasks: 500, deliverables: 50 },
-  studio: { seats: 20, clients: -1, tasks: 10000, deliverables: 2000 },
-  agency: { seats: -1, clients: -1, tasks: -1, deliverables: -1 },
-}
+> = Object.fromEntries(
+  Object.entries(PLAN_LIMITS).map(([plan, l]) => [plan, {
+    seats: l.seatLimit,
+    clients: l.clientLimit,
+    tasks: l.taskLimit,
+    deliverables: l.deliverableLimit,
+  }]),
+) as Record<Plan, { seats: number; clients: number; tasks: number; deliverables: number }>
 
 // Plan → feature-flag table for UI feature gating.
 export interface PlanFeatures {

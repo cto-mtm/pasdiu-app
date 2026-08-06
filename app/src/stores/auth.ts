@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, type Ref } from 'vue'
 import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
@@ -21,6 +21,8 @@ import {
   serverTimestamp,
   setDoc,
   where,
+  type DocumentReference,
+  type DocumentSnapshot,
 } from 'firebase/firestore'
 import { FirebaseError } from 'firebase/app'
 import { auth, db } from '../lib/firebase'
@@ -67,16 +69,14 @@ export const useAuthStore = defineStore('auth', () => {
   const memberships = ref<Membership[]>([])
   // Which org the app is currently scoped to (persisted per uid).
   const activeOrgId = ref<string | null>(null)
-  // Live orgs/{activeOrgId}/members/{uid} doc, so role/clientId changes in the
-  // active org reflect without a re-login (same discipline as the old
-  // users/{uid} profile listener).
+  // The active org's three live docs (attached/detached together — see
+  // `liveDoc` below, which owns their lifecycle and the rationale).
+  // orgs/{activeOrgId}/members/{uid} — role/clientId, live.
   const liveMember = ref<UserProfile | null>(null)
-  // Live orgs/{activeOrgId} doc — plan/limits/subscription state are written
-  // by the billing webhook, so upgrades reflect here without a reload.
+  // orgs/{activeOrgId} — plan/limits/subscription state, live.
   const org = ref<Org | null>(null)
-  // Live orgs/{activeOrgId}/usage/current doc — seat/client/task counters the
-  // entitlement gates compare against the org's limits. null while loading
-  // (gates fail open; rules are the backstop).
+  // orgs/{activeOrgId}/usage/current — entitlement counters. null while
+  // loading (gates fail open; rules are the backstop).
   const usage = ref<OrgUsage | null>(null)
   const error = ref<string | null>(null)
 
@@ -115,109 +115,98 @@ export const useAuthStore = defineStore('auth', () => {
   // onboarding state (create a workspace or accept an invite).
   const needsWorkspace = computed(() => isAuthed.value && memberships.value.length === 0)
 
-  // ── Live member-doc subscription ────────────────────────────────
-  let memberUnsub: (() => void) | null = null
+  // ── The active org's three live docs ────────────────────────────
+  // `orgs/{activeOrgId}` and its `members/{uid}` + `usage/current` children
+  // share one lifecycle, defined once here so the three can't drift apart:
+  // attach on activation/switch, detach on logout, and clear the ref BEFORE
+  // reattaching so a previous workspace's role, plan or counters are never
+  // readable during the gap. `role` falls back to the memberships entry for
+  // the new org meanwhile.
+  //
+  // Permission loss — the shape a removal from the org arrives in — drops the
+  // value in every case; only the member doc does anything beyond that.
+  function liveDoc<T>(
+    target: Ref<T | null>,
+    docRef: (orgId: string, uid: string) => DocumentReference,
+    onSnap: (snap: DocumentSnapshot) => void,
+    onError?: () => void,
+  ): { attach: () => void; detach: () => void } {
+    let unsub: (() => void) | null = null
+    function detach(): void {
+      if (unsub) { unsub(); unsub = null }
+    }
+    function attach(): void {
+      detach()
+      target.value = null
+      const uid = identity.value?.uid
+      const orgId = activeOrgId.value
+      if (!uid || !orgId) return
+      unsub = onSnapshot(docRef(orgId, uid), onSnap, () => {
+        target.value = null
+        onError?.()
+      })
+    }
+    return { attach, detach }
+  }
+
+  // Live orgs/{activeOrgId}/members/{uid} — role/clientId changes in the
+  // active org reflect without a re-login.
+  //
   // Re-entrancy guard for error-driven revalidation: the error callback can
   // fire while a refreshMemberships kicked off by a previous error is still
   // in flight — never stack them.
   let memberErrorRevalidating = false
-  function detachMember(): void {
-    if (memberUnsub) { memberUnsub(); memberUnsub = null }
-  }
-
-  function subscribeMember(): void {
-    detachMember()
-    // Clear immediately so a previous org's role never leaks across a switch;
-    // `role` falls back to the memberships entry for the new org meanwhile.
-    liveMember.value = null
-    const uid = identity.value?.uid
-    const orgId = activeOrgId.value
-    if (!uid || !orgId) return
-    memberUnsub = onSnapshot(
-      doc(db, 'orgs', orgId, 'members', uid),
-      (snap) => {
-        if (snap.exists()) {
-          liveMember.value = mapMember(snap.id, snap.data())
-        } else {
-          // Removed from the active org: revalidate memberships, which picks
-          // a new active org (or lands in onboarding).
-          liveMember.value = null
-          void refreshMemberships()
-        }
-      },
-      () => {
-        // Removal from the org arrives HERE, not as exists=false: rules
-        // revoke the removed user's read on their own member doc, so
-        // Firestore reports permission-denied. Revalidate memberships (picks
-        // a new active org or lands in onboarding). The org/usage listeners
-        // lose permission at the same moment but stay drop-only — this one
-        // refresh is sufficient, and firing it from all three would just
-        // storm the same query.
+  const memberDoc = liveDoc(
+    liveMember,
+    (orgId, uid) => doc(db, 'orgs', orgId, 'members', uid),
+    (snap) => {
+      if (snap.exists()) {
+        liveMember.value = mapMember(snap.id, snap.data())
+      } else {
+        // Removed from the active org: revalidate memberships, which picks
+        // a new active org (or lands in onboarding).
         liveMember.value = null
-        if (memberErrorRevalidating) return
-        memberErrorRevalidating = true
-        refreshMemberships()
-          .catch(() => {
-            // Revalidation itself failed (rules/network): stop here with
-            // liveMember null — the router guard sorts it out on the next
-            // navigation.
-          })
-          .finally(() => { memberErrorRevalidating = false })
-      },
-    )
-  }
+        void refreshMemberships()
+      }
+    },
+    () => {
+      // Removal from the org arrives HERE, not as exists=false: rules
+      // revoke the removed user's read on their own member doc, so
+      // Firestore reports permission-denied. Revalidate memberships (picks
+      // a new active org or lands in onboarding). The org/usage listeners
+      // lose permission at the same moment but stay drop-only — this one
+      // refresh is sufficient, and firing it from all three would just
+      // storm the same query.
+      if (memberErrorRevalidating) return
+      memberErrorRevalidating = true
+      refreshMemberships()
+        .catch(() => {
+          // Revalidation itself failed (rules/network): stop here with
+          // liveMember null — the router guard sorts it out on the next
+          // navigation.
+        })
+        .finally(() => { memberErrorRevalidating = false })
+    },
+  )
 
-  // ── Live org-doc subscription ───────────────────────────────────
-  // Same lifecycle as the member doc: attach on activation/switch, detach on
-  // logout. Members can read their org doc (rules), so this is safe per-role.
-  let orgUnsub: (() => void) | null = null
-  function detachOrg(): void {
-    if (orgUnsub) { orgUnsub(); orgUnsub = null }
-  }
+  // Live orgs/{activeOrgId} — plan/limits/subscription state are written by
+  // the billing webhook, so upgrades reflect without a reload. Members can
+  // read their own org doc (rules), so this is safe per-role.
+  const orgDoc = liveDoc(
+    org,
+    (orgId) => doc(db, 'orgs', orgId),
+    (snap) => { org.value = snap.exists() ? mapOrg(snap.id, snap.data()) : null },
+  )
 
-  function subscribeOrg(): void {
-    detachOrg()
-    // Clear immediately so a previous org's plan never leaks across a switch.
-    org.value = null
-    const uid = identity.value?.uid
-    const orgId = activeOrgId.value
-    if (!uid || !orgId) return
-    orgUnsub = onSnapshot(
-      doc(db, 'orgs', orgId),
-      (snap) => {
-        org.value = snap.exists() ? mapOrg(snap.id, snap.data()) : null
-      },
-      // Permission loss (e.g. removed from the org) — the member listener
-      // drives revalidation; here we just drop the stale doc.
-      () => { org.value = null },
-    )
-  }
-
-  // ── Live usage-doc subscription ─────────────────────────────────
-  // orgs/{activeOrgId}/usage/current — same lifecycle as the org doc: attach
-  // on activation/switch, detach on logout, clear before resubscribing so a
-  // previous org's counters never leak across a switch.
-  let usageUnsub: (() => void) | null = null
-  function detachUsage(): void {
-    if (usageUnsub) { usageUnsub(); usageUnsub = null }
-  }
-
-  function subscribeUsage(): void {
-    detachUsage()
-    usage.value = null
-    const uid = identity.value?.uid
-    const orgId = activeOrgId.value
-    if (!uid || !orgId) return
-    usageUnsub = onSnapshot(
-      doc(db, 'orgs', orgId, 'usage', 'current'),
-      (snap) => {
-        usage.value = snap.exists() ? mapUsage(snap.data()) : null
-      },
-      // Permission loss — the member listener drives revalidation; just drop
-      // the stale counters (gates fail open until the next snapshot).
-      () => { usage.value = null },
-    )
-  }
+  // Live orgs/{activeOrgId}/usage/current — the seat/client/task counters the
+  // entitlement gates compare against the org's limits. Dropping them on
+  // permission loss makes the gates fail open until the next snapshot; rules
+  // are the backstop.
+  const usageDoc = liveDoc(
+    usage,
+    (orgId) => doc(db, 'orgs', orgId, 'usage', 'current'),
+    (snap) => { usage.value = snap.exists() ? mapUsage(snap.data()) : null },
+  )
 
   // ── Memberships ─────────────────────────────────────────────────
   async function refreshMemberships(): Promise<void> {
@@ -226,6 +215,22 @@ export const useAuthStore = defineStore('auth', () => {
     const snap = await getDocs(query(collectionGroup(db, 'members'), where('uid', '==', uid)))
     memberships.value = snap.docs.map((d) => mapMembership(d.data()))
     ensureActiveOrg()
+  }
+
+  // The one path that changes which workspace the app is scoped to. Both
+  // callers below go through it so the sequence can't drift: point at the new
+  // org, persist the choice per account, reattach the three live docs.
+  //
+  // Dropping the previous org's cached data (`useDataStore().reset()`) stays
+  // with the callers on purpose — each has its own condition for when a reset
+  // is warranted, and a first activation has nothing to drop.
+  function activateOrg(uid: string, next: string | null): void {
+    activeOrgId.value = next
+    if (next) localStorage.setItem(activeOrgKey(uid), next)
+    else localStorage.removeItem(activeOrgKey(uid))
+    memberDoc.attach()
+    orgDoc.attach()
+    usageDoc.attach()
   }
 
   // Validate/select the active org: keep the persisted choice when it's still
@@ -238,12 +243,7 @@ export const useAuthStore = defineStore('auth', () => {
     const next = valid ? stored : memberships.value[0]?.orgId ?? null
     if (next === activeOrgId.value) return
     const hadOrg = activeOrgId.value !== null
-    activeOrgId.value = next
-    if (next) localStorage.setItem(activeOrgKey(uid), next)
-    else localStorage.removeItem(activeOrgKey(uid))
-    subscribeMember()
-    subscribeOrg()
-    subscribeUsage()
+    activateOrg(uid, next)
     if (hadOrg) {
       // The active org changed underneath us (e.g. removed from it) — same
       // clean-slate path as an explicit switch: no cross-org bleed.
@@ -260,11 +260,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (orgId !== activeOrgId.value) {
       track('org_switched', { orgId })
       useDataStore().reset()
-      activeOrgId.value = orgId
-      localStorage.setItem(activeOrgKey(uid), orgId)
-      subscribeMember()
-      subscribeOrg()
-      subscribeUsage()
+      activateOrg(uid, orgId)
     }
     await router.replace(homeRoute())
   }
@@ -349,9 +345,9 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function clearSession(): Promise<void> {
-    detachMember()
-    detachOrg()
-    detachUsage()
+    memberDoc.detach()
+    orgDoc.detach()
+    usageDoc.detach()
     identity.value = null
     memberships.value = []
     activeOrgId.value = null

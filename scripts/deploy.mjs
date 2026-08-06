@@ -23,6 +23,17 @@ if (!projectId || projectId.includes('REPLACE_ME')) {
   process.exit(1);
 }
 
+// Warn if VITE_API_URL is missing — a prod build without it has a dead API.
+const appEnvPath = path.join(ROOT, 'app', '.env');
+if (fs.existsSync(appEnvPath)) {
+  const envContent = fs.readFileSync(appEnvPath, 'utf8');
+  if (!envContent.includes('VITE_API_URL=')) {
+    console.warn('⚠  VITE_API_URL is not set in app/.env — the production build will use the REPLACE_ME fallback and API calls will fail.\n');
+  }
+} else {
+  console.warn('⚠  app/.env does not exist — VITE_API_URL is unset. API calls will fail in production.\n');
+}
+
 const exec = (cmd, cwd = ROOT) => {
   console.log(`> ${cmd}`);
   execSync(cmd, { cwd, stdio: 'inherit' });

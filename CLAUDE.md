@@ -21,8 +21,9 @@
 ## Data & auth
 
 - Firebase **Auth** + **Firestore** (both emulator-backed in dev; wired in `app/src/lib/firebase.ts`, emulators-only when `import.meta.env.DEV`).
-- Pinia holds reactive client state; Firestore is the source of truth. Shared domain data flows through `app/src/stores/data.ts`. Read-only views (DeliverableDetailPage, CalendarPage, ClientPortalPage, PortalDeliverablePage, SchedulePage) may query Firestore directly using mappers from `app/src/lib/mappers.ts` — reads only; writes always go through the store or the API.
+- Pinia holds reactive client state; Firestore is the source of truth. Shared domain data flows through the `data` store at `app/src/stores/data/` — one slice per collection (`clients.ts`, `projects.ts`, `board.ts`, `tasks.ts`, …) composed in `index.ts`, over a shared `context.ts` (reactive cache, live-listener registry, freshness memo, org scoping). Add an action to the slice that owns the collection; import the store as `../stores/data` exactly as before. Read-only views (DeliverableDetailPage, CalendarPage, ClientPortalPage, PortalDeliverablePage, SchedulePage) may query Firestore directly using mappers from `app/src/lib/mappers.ts` — reads only; writes always go through the store or the API.
 - Roles (`admin`/`pm`/`contractor`/`client`) live on **member docs** (`orgs/{orgId}/members/{uid}`) — NOT on `users/{uid}` (which is identity-only). The router reads the role via `useAuthStore`'s live member listener.
+- Anything that changes org scoping goes through the two helpers in `app/src/stores/auth.ts`, never alongside them: `liveDoc()` owns the member/org/usage subscriptions' lifecycle, and `activateOrg()` is the only path that changes the active workspace. Adding a fourth live doc or a new way to switch orgs means extending those, not hand-rolling a copy.
 - Seed demo users + data with `npm run seed` (in `firebase/`) while the emulators run. Security rules: `firebase/firestore.rules`.
 
 ## i18n rules (non-negotiable)

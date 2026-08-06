@@ -10,7 +10,7 @@
 // Display stays local: Intl (vue-i18n's `d()`) formats in the viewer's zone,
 // which is what we want now that the stored instant is mid-day.
 
-import { DUE_HOUR_UTC } from './types'
+import { parseDueDate } from '@pasdiu/shared'
 
 /** Date → "YYYY-MM-DD" for <input type="date">, read in UTC. */
 export function toDateInputValue(date: Date | null): string {
@@ -21,7 +21,6 @@ export function toDateInputValue(date: Date | null): string {
 /** "YYYY-MM-DD" from <input type="date"> → that calendar day at 12:00 UTC. */
 export function fromDateInputValue(value: string): Date | null {
   if (!value) return null
-  const [year, month, day] = value.split('-').map(Number)
-  if (!year || !month || !day) return null
-  return new Date(Date.UTC(year, month - 1, day, DUE_HOUR_UTC))
+  // Delegate to the shared canonical noon-pinning logic.
+  return parseDueDate(value)
 }

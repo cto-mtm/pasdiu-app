@@ -66,11 +66,15 @@ app.use(calendarRouter);
 
 // ── 404 ─────────────────────────────────────────────────────────────────────
 app.use((req, res) => {
-  res.status(404).json({
-    error: "Not found",
+  const body: Record<string, unknown> = {
+    error: "not_found",
     route: `${req.method} ${req.path}`,
-    validRoutes: VALID_ROUTES,
-  });
+  };
+  // Only expose the route list in local dev (K_SERVICE is set in production).
+  if (!process.env.K_SERVICE) {
+    body.validRoutes = VALID_ROUTES;
+  }
+  res.status(404).json(body);
 });
 
 // The raw express app, exported for the integration tests (test/helpers.ts
@@ -86,7 +90,6 @@ export { app };
 export const api = onRequest(
   {
     region: "us-east5",
-    cors: true,
     invoker: "public",
     maxInstances: 10,
     // Secret Manager injection in prod — without this, the deployed function
