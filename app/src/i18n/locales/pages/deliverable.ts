@@ -25,6 +25,16 @@ const en = {
   priorityLow: 'Low',
   sortByPriority: 'Priority first',
   sortByOrder: 'Batch order',
+  markDelivered: 'Mark as Delivered',
+  markDeliveredTitle: 'Mark deliverable as delivered',
+  markDeliveredHint: 'This will mark the deliverable as delivered on behalf of the client. A note is required to document how or where it was delivered.',
+  markedDelivered: 'Deliverable marked as delivered.',
+  deliveredLabel: 'Delivered \u2713',
+  approveViaLabel: 'Delivery method',
+  viaInPerson: 'In person / direct handoff',
+  viaExternal: 'External (email, link, etc.)',
+  approveNoteLabel: 'Delivery note',
+  approveNotePlaceholder: 'How/where was it delivered?',
 }
 
 const es: typeof en = {
@@ -54,6 +64,16 @@ const es: typeof en = {
   priorityLow: 'Baja',
   sortByPriority: 'Prioridad primero',
   sortByOrder: 'Orden del lote',
+  markDelivered: 'Marcar como Entregado',
+  markDeliveredTitle: 'Marcar entregable como entregado',
+  markDeliveredHint: 'Esto marcar\u00e1 el entregable como entregado en nombre del cliente. Se requiere una nota para documentar c\u00f3mo o d\u00f3nde se entreg\u00f3.',
+  markedDelivered: 'Entregable marcado como entregado.',
+  deliveredLabel: 'Entregado \u2713',
+  approveViaLabel: 'M\u00e9todo de entrega',
+  viaInPerson: 'En persona / entrega directa',
+  viaExternal: 'Externo (correo, enlace, etc.)',
+  approveNoteLabel: 'Nota de entrega',
+  approveNotePlaceholder: '\u00bfC\u00f3mo/d\u00f3nde se entreg\u00f3?',
 }
 
 export default { en, es }

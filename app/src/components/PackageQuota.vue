@@ -4,7 +4,7 @@
 // (never reads deliverable docs) so the whole widget costs ~3 reads.
 import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { collection, getCountFromServer, query, where, Timestamp } from 'firebase/firestore'
+import { collection, doc, getCountFromServer, getDoc, query, where, Timestamp } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useAuthStore } from '../stores/auth'
 import type { Package, PackageLine } from '../lib/types'
@@ -16,14 +16,31 @@ const auth = useAuthStore()
 
 interface LineStat {
   typeId: string
+  typeName: string
   quantity: number
   delivered: number
   inProgress: number
-  planned: number
+  total: number
 }
 
 const stats = ref<LineStat[]>([])
 const loading = ref(true)
+
+// Resolve deliverable type id → human name. Cached per session so repeat
+// renders (e.g. switching views) don't re-read the same docs.
+const typeNameCache = new Map<string, string>()
+async function resolveTypeName(typeId: string): Promise<string> {
+  if (typeNameCache.has(typeId)) return typeNameCache.get(typeId)!
+  try {
+    const snap = await getDoc(doc(db, 'deliverableTypes', typeId))
+    const name = snap.exists() ? (snap.data().name as string) || typeId : typeId
+    typeNameCache.set(typeId, name)
+    return name
+  } catch {
+    typeNameCache.set(typeId, typeId)
+    return typeId
+  }
+}
 
 // Period boundaries from startsOn + period.
 function currentPeriodBounds(line: PackageLine, startsOn: Date | null): { start: Date; end: Date } {
@@ -56,32 +73,38 @@ async function loadStats() {
     const startTs = Timestamp.fromDate(start)
     const endTs = Timestamp.fromDate(end)
 
-    // Delivered in this period (count() aggregation — 1 read per 1000 docs).
-    const deliveredSnap = await getCountFromServer(query(
-      collection(db, 'deliverables'),
-      where('orgId', '==', orgId),
-      where('projectId', '==', props.pkg.projectId),
-      where('typeId', '==', line.typeId),
-      where('status', '==', 'delivered'),
-      where('deliveredAt', '>=', startTs),
-      where('deliveredAt', '<=', endTs),
-    ))
+    const [deliveredSnap, activeSnap, typeName] = await Promise.all([
+      // Delivered in this period (count() aggregation — 1 read per 1000 docs).
+      getCountFromServer(query(
+        collection(db, 'deliverables'),
+        where('orgId', '==', orgId),
+        where('projectId', '==', props.pkg.projectId),
+        where('typeId', '==', line.typeId),
+        where('status', '==', 'delivered'),
+        where('deliveredAt', '>=', startTs),
+        where('deliveredAt', '<=', endTs),
+      )),
+      // In progress (active).
+      getCountFromServer(query(
+        collection(db, 'deliverables'),
+        where('orgId', '==', orgId),
+        where('projectId', '==', props.pkg.projectId),
+        where('typeId', '==', line.typeId),
+        where('status', '==', 'active'),
+      )),
+      resolveTypeName(line.typeId),
+    ])
 
-    // In progress (active, created in period).
-    const activeSnap = await getCountFromServer(query(
-      collection(db, 'deliverables'),
-      where('orgId', '==', orgId),
-      where('projectId', '==', props.pkg.projectId),
-      where('typeId', '==', line.typeId),
-      where('status', '==', 'active'),
-    ))
+    const delivered = deliveredSnap.data().count
+    const inProgress = activeSnap.data().count
 
     results.push({
       typeId: line.typeId,
+      typeName,
       quantity: line.quantity,
-      delivered: deliveredSnap.data().count,
-      inProgress: activeSnap.data().count,
-      planned: deliveredSnap.data().count + activeSnap.data().count,
+      delivered,
+      inProgress,
+      total: delivered + inProgress,
     })
   }
 
@@ -96,18 +119,34 @@ watch(() => props.pkg, loadStats)
 <template>
   <div v-if="!loading && stats.length" class="rounded-xl border p-4" style="background: var(--surface); border-color: var(--border);">
     <h3 class="mb-3 text-sm font-semibold" style="color: var(--text);">{{ pkg.name }}</h3>
-    <div class="space-y-2">
-      <div v-for="s in stats" :key="s.typeId" class="flex items-center justify-between text-sm">
-        <span style="color: var(--text-muted);">{{ s.typeId }}</span>
-        <div class="flex items-center gap-3">
-          <span style="color: var(--accent-emerald);">{{ s.delivered }} {{ t('packages.delivered') }}</span>
-          <span style="color: var(--accent-cyan);">{{ s.inProgress }} {{ t('packages.inProgress') }}</span>
-          <span style="color: var(--text);">{{ s.planned }} / {{ s.quantity }}</span>
+    <div class="space-y-3">
+      <div v-for="s in stats" :key="s.typeId">
+        <div class="flex items-center justify-between text-sm">
+          <span class="font-medium" style="color: var(--text);">{{ s.typeName }}</span>
+          <span style="color: var(--text-muted);">{{ s.total }} / {{ s.quantity }}</span>
         </div>
         <!-- Progress bar -->
-        <div class="ml-3 h-1.5 w-20 overflow-hidden rounded-full" style="background: var(--surface-2);">
-          <div class="h-full rounded-full" style="background: var(--accent-emerald);"
-            :style="{ width: `${Math.min(100, (s.delivered / s.quantity) * 100)}%` }" />
+        <div class="mt-1.5 flex h-2 w-full overflow-hidden rounded-full" style="background: var(--surface-2);">
+          <div
+            class="h-full rounded-l-full"
+            style="background: var(--accent-emerald);"
+            :style="{ width: `${Math.min(100, (s.delivered / s.quantity) * 100)}%` }"
+          />
+          <div
+            class="h-full"
+            style="background: var(--accent-cyan);"
+            :style="{ width: `${Math.min(100 - (s.delivered / s.quantity) * 100, (s.inProgress / s.quantity) * 100)}%` }"
+          />
+        </div>
+        <div class="mt-1 flex items-center gap-4 text-xs" style="color: var(--text-muted);">
+          <span class="flex items-center gap-1">
+            <span class="inline-block h-2 w-2 rounded-full" style="background: var(--accent-emerald);" />
+            {{ s.delivered }} {{ t('packages.delivered') }}
+          </span>
+          <span class="flex items-center gap-1">
+            <span class="inline-block h-2 w-2 rounded-full" style="background: var(--accent-cyan);" />
+            {{ s.inProgress }} {{ t('packages.inProgress') }}
+          </span>
         </div>
       </div>
     </div>

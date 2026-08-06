@@ -6,7 +6,9 @@ import { collection, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useDataStore } from '../stores/data'
 import { useAuthStore } from '../stores/auth'
+import { useToastStore } from '../stores/toast'
 import { useBusy } from '../composables/useBusy'
+import { apiFetch } from '../lib/api'
 import { mapTask } from '../lib/mappers'
 import { currentStage } from '../lib/deliverableStage'
 import { statusColor, statusKey } from '../lib/status'
@@ -27,6 +29,7 @@ const { t } = useI18n()
 const route = useRoute()
 const data = useDataStore()
 const auth = useAuthStore()
+const toast = useToastStore()
 const { busy, run } = useBusy()
 
 const deliverableId = computed(() => String(route.params.deliverableId))
@@ -86,6 +89,43 @@ const stageProgress = computed(() => {
   if (!deliverable.value) return null
   return currentStage(deliverable.value, stageTasks.value)
 })
+
+// Managers can mark a deliverable as delivered (proxy approval) when all
+// stages are done but the deliverable is still active.
+const canMarkDelivered = computed(() =>
+  auth.isManager
+  && deliverable.value?.status === 'active'
+  && stageProgress.value?.complete,
+)
+const showApproveModal = ref(false)
+const approveNote = ref('')
+const approveVia = ref<'in_person' | 'external'>('in_person')
+
+function openApproveModal() {
+  approveNote.value = ''
+  approveVia.value = 'in_person'
+  showApproveModal.value = true
+}
+
+async function confirmMarkDelivered() {
+  if (!approveNote.value.trim()) return
+  await run(async () => {
+    const orgId = auth.activeOrgId
+    const res = await apiFetch(`/orgs/${orgId}/deliverables/${deliverableId.value}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: approveNote.value.trim(), via: approveVia.value }),
+    })
+    if (res.ok) {
+      toast.success(t('deliverableDetail.markedDelivered'))
+      showApproveModal.value = false
+      // Reload to reflect the status change.
+      await load()
+    } else {
+      toast.error(t('common.saveError'))
+    }
+  })
+}
 
 // Map stage id → task for O(1) lookup in the template.
 const stageTaskMap = computed(() => {
@@ -198,8 +238,23 @@ onMounted(load)
       <p v-if="stageProgress && !stageProgress.complete" class="text-sm" style="color: var(--text-muted);">
         {{ t('deliverableDetail.currentStage', { name: stageProgress.stage?.name, n: stageProgress.index + 1, total: deliverable.stages.length }) }}
       </p>
-      <p v-else-if="stageProgress?.complete" class="text-sm" style="color: var(--accent-emerald);">
-        {{ t('deliverableDetail.complete') }}
+      <div v-else-if="stageProgress?.complete" class="flex flex-wrap items-center gap-3">
+        <p class="text-sm" style="color: var(--accent-emerald);">
+          {{ t('deliverableDetail.complete') }}
+        </p>
+        <BaseButton
+          v-if="canMarkDelivered"
+          :disabled="busy"
+          @click="openApproveModal"
+        >
+          {{ t('deliverableDetail.markDelivered') }}
+        </BaseButton>
+      </div>
+      <p v-if="deliverable.status === 'delivered'" class="mt-1 text-sm" style="color: var(--accent-emerald);">
+        {{ t('deliverableDetail.deliveredLabel') }}
+        <span v-if="deliverable.approvedBy" style="color: var(--text-muted);">
+          — {{ data.userName(deliverable.approvedBy) }}
+        </span>
       </p>
 
       <!-- Stage pipeline visualization -->
@@ -378,6 +433,25 @@ onMounted(load)
           />
         </div>
         <ModalFooter :label="t('actions.save')" :busy="busy" :disabled="!editName.trim()" @submit="saveEdit" @cancel="showEdit = false" />
+      </form>
+    </Modal>
+
+    <!-- Mark as Delivered modal (manager proxy approval) -->
+    <Modal :open="showApproveModal" :title="t('deliverableDetail.markDeliveredTitle')" @close="showApproveModal = false">
+      <form class="space-y-4" @submit.prevent="confirmMarkDelivered">
+        <p class="text-sm" style="color: var(--text-muted);">{{ t('deliverableDetail.markDeliveredHint') }}</p>
+        <label class="block">
+          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('deliverableDetail.approveViaLabel') }}</span>
+          <BaseSelect v-model="approveVia">
+            <option value="in_person">{{ t('deliverableDetail.viaInPerson') }}</option>
+            <option value="external">{{ t('deliverableDetail.viaExternal') }}</option>
+          </BaseSelect>
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-xs uppercase tracking-wide" style="color: var(--text-muted);">{{ t('deliverableDetail.approveNoteLabel') }}</span>
+          <BaseInput v-model="approveNote" required :placeholder="t('deliverableDetail.approveNotePlaceholder')" />
+        </label>
+        <ModalFooter :label="t('deliverableDetail.markDelivered')" :busy="busy" :disabled="!approveNote.trim()" @submit="confirmMarkDelivered" @cancel="showApproveModal = false" />
       </form>
     </Modal>
   </section>
