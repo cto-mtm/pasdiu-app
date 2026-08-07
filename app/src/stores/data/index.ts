@@ -109,7 +109,7 @@ export const useDataStore = defineStore('data', () => {
     ...counters,
     // loadInvites, createInvite, revokeInvite
     ...invites,
-    // deleteTask, deleteSubGroup, deleteProject, deleteClient
+    // deleteTask, deleteSubGroup, deleteProject, deleteClient, deleteDeliverable
     ...deletes,
     // updateOrgPipeline
     ...org,

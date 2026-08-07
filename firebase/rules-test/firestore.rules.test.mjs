@@ -150,6 +150,16 @@ before(async () => {
     // Deliverable subcollections (versions + notes)
     await setDoc(doc(db, 'deliverables/d1/versions/dv1'), { label: 'v1', note: 'First cut.', mediaUrl: '', createdAt: new Date() })
     await setDoc(doc(db, 'deliverables/d1/notes/dn1'), { versionId: 'dv1', authorUid: 'mgr', body: 'Looks good.', resolved: false, createdAt: new Date() })
+
+    // Projects + sub-groups (the deliverables above hang off p1/sg1). Deleting
+    // these is functions-only now (cascade endpoint) to avoid orphaning their
+    // deliverables — the delete-denial tests target these.
+    await setDoc(doc(db, 'projects/p1'), { orgId: 'o_a', clientId: 'c1', name: 'Project One', defaultView: 'kanban', meta: [] })
+    await setDoc(doc(db, 'subGroups/sg1'), { orgId: 'o_a', projectId: 'p1', name: 'Batch 1', order: 0, meta: [] })
+    // Task delete-rule targets: a STANDALONE task (managers may delete) and a
+    // deliverable STAGE task (they may not — cascade endpoints only).
+    await setDoc(doc(db, 'tasks/tdel_std'), { orgId: 'o_a', title: 'Standalone', clientId: 'c1', assigneeUid: 'ed', status: 'backlog', deliverableId: '' })
+    await setDoc(doc(db, 'tasks/tdel_stage'), { orgId: 'o_a', title: 'Stage', clientId: 'c1', assigneeUid: 'ed', status: 'backlog', deliverableId: 'd1', stageId: 's1' })
   })
 })
 
@@ -639,6 +649,40 @@ test('deliverable create is denied for every role (functions-only)', async () =>
 test('deliverable delete is denied for every role (functions-only)', async () => {
   const mgr = env.authenticatedContext('mgr').firestore()
   await assertFails(deleteDoc(doc(mgr, 'deliverables/d1')))
+})
+
+// ── cascade-delete invariants: no client-side path may orphan a deliverable ──
+// The hierarchy (client → project → sub-group → deliverable → stage tasks) is
+// removed only by the Admin-SDK cascade endpoints. Deliverables are
+// functions-only, so a client-side delete of any ANCESTOR would leave them —
+// and their usage counter — orphaned. The rules forbid every such path.
+
+test('manager cannot delete a client (cascade endpoint only)', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertFails(deleteDoc(doc(mgr, 'clients/c2')))
+})
+
+test('manager cannot delete a project (cascade endpoint only)', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertFails(deleteDoc(doc(mgr, 'projects/p1')))
+})
+
+test('manager cannot delete a sub-group (cascade endpoint only)', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertFails(deleteDoc(doc(mgr, 'subGroups/sg1')))
+})
+
+test('manager cannot delete a deliverable stage task (would wedge the pipeline)', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertFails(deleteDoc(doc(mgr, 'tasks/tdel_stage')))
+})
+
+// The one client-side task delete that stays legal — a standalone task carries
+// no deliverable, so nothing is orphaned. (Runs last of this group: it removes
+// tdel_std, and no later test depends on it.)
+test('manager CAN delete a standalone task (deliverableId empty)', async () => {
+  const mgr = env.authenticatedContext('mgr').firestore()
+  await assertSucceeds(deleteDoc(doc(mgr, 'tasks/tdel_std')))
 })
 
 test('client reads only their own tenant deliverables with clientVisible', async () => {

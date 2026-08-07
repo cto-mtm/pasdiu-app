@@ -245,7 +245,12 @@ service cloud.firestore {
         && underClientLimit(request.resource.data.orgId)
         && clientCounterIncremented(request.resource.data.orgId);
       allow update: if isManagerOf(resource.data.orgId) && orgIdUnchanged();
-      allow delete: if isManagerOf(resource.data.orgId);
+      // Deletion cascades to projects → sub-groups → deliverables → tasks. The
+      // client SDK can't remove the (functions-only) deliverables or move
+      // activeDeliverables, so a client-side delete would orphan them. Managers
+      // delete a client through the Admin-SDK cascade endpoint
+      // (functions/routes/resources.ts), never directly.
+      allow delete: if false;
     }
 
     // Projects: client scoped by the project's clientId, within the org.
@@ -256,7 +261,9 @@ service cloud.firestore {
           && resource.data.clientId == myClientIdIn(resource.data.orgId));
       allow create: if hasOrgId() && isManagerOf(request.resource.data.orgId);
       allow update: if isManagerOf(resource.data.orgId) && orgIdUnchanged();
-      allow delete: if isManagerOf(resource.data.orgId);
+      // Functions-only: deleting a project cascades to its deliverables, which
+      // the client can't remove without orphaning them (see clients above).
+      allow delete: if false;
     }
 
     // Sub-groups: internal structure — org managers/contractors only.
@@ -264,7 +271,9 @@ service cloud.firestore {
       allow read: if isManagerOf(resource.data.orgId) || isContractorOf(resource.data.orgId);
       allow create: if hasOrgId() && isManagerOf(request.resource.data.orgId);
       allow update: if isManagerOf(resource.data.orgId) && orgIdUnchanged();
-      allow delete: if isManagerOf(resource.data.orgId);
+      // Functions-only: deleting a sub-group cascades to its deliverables (see
+      // clients above). Managers use the cascade endpoint.
+      allow delete: if false;
     }
 
     // Tasks: client scoped by clientId within the org, AND per-task visibility
@@ -293,7 +302,14 @@ service cloud.firestore {
         && validStatus(request.resource.data.status)
         && underTaskLimit(request.resource.data.orgId)
         && taskCounterIncremented(request.resource.data.orgId);
-      allow delete: if isManagerOf(resource.data.orgId);
+      // Standalone tasks (deliverableId == '') are deletable by managers. A
+      // deliverable's STAGE tasks are NOT: the deliverable's stageSummary /
+      // derived-stage model references them by id, so deleting one out of band
+      // wedges the pipeline. Stage tasks only leave via the deliverable-delete
+      // or cascade endpoints (Admin SDK, bypasses rules). Absent field reads as
+      // '' — legacy standalone tasks stay deletable.
+      allow delete: if isManagerOf(resource.data.orgId)
+        && resource.data.get('deliverableId', '') == '';
       allow update: if orgIdUnchanged()
         && (
           (isManagerOf(resource.data.orgId) && validStatus(request.resource.data.status))

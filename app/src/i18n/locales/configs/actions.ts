@@ -21,6 +21,11 @@ const en = {
   deleteSubGroupConfirm: 'Delete this sub-group and its tasks? This cannot be undone.',
   deleteTask: 'Delete task',
   deleteTaskConfirm: 'Delete “{title}”? This cannot be undone.',
+  // Stage tasks can't be deleted on their own — removing one stage would leave
+  // the deliverable's pipeline broken. Delete the whole deliverable instead.
+  deleteTaskInDeliverable: 'This task is a stage of a deliverable. Delete the deliverable to remove it.',
+  deleteDeliverable: 'Delete deliverable',
+  deleteDeliverableConfirm: 'Delete “{name}” and all of its stage tasks? This cannot be undone.',
   metadata: 'Metadata',
   addField: 'Add field',
   fieldLabel: 'Label',
@@ -59,6 +64,9 @@ const es: typeof en = {
   deleteSubGroupConfirm: '¿Eliminar este subgrupo y sus tareas? No se puede deshacer.',
   deleteTask: 'Eliminar tarea',
   deleteTaskConfirm: '¿Eliminar «{title}»? No se puede deshacer.',
+  deleteTaskInDeliverable: 'Esta tarea es una etapa de un entregable. Elimina el entregable para quitarla.',
+  deleteDeliverable: 'Eliminar entregable',
+  deleteDeliverableConfirm: '¿Eliminar «{name}» y todas sus tareas de etapa? No se puede deshacer.',
   metadata: 'Metadatos',
   addField: 'Añadir campo',
   fieldLabel: 'Etiqueta',

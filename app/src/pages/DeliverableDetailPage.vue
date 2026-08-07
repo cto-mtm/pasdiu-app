@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { collection, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../lib/firebase'
@@ -23,10 +23,12 @@ import BaseInput from '../components/BaseInput.vue'
 import BaseSelect from '../components/BaseSelect.vue'
 import Modal from '../components/Modal.vue'
 import ModalFooter from '../components/ModalFooter.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import MetaEditor from '../components/MetaEditor.vue'
 
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const data = useDataStore()
 const auth = useAuthStore()
 const toast = useToastStore()
@@ -79,6 +81,25 @@ async function saveEdit() {
     // updateDeliverable patches the store copy, which `deliverable` reads.
     await data.updateDeliverable(deliverableId.value, patch)
     showEdit.value = false
+  })
+}
+
+// Delete deliverable (managers). The server cascades to its stage tasks; on
+// success the store prunes both, so we leave for the project board rather than
+// render a now-missing deliverable. Capture the projectId BEFORE deleting —
+// `deliverable` reads the store copy, which is gone the moment it succeeds.
+const showDelete = ref(false)
+async function confirmDelete() {
+  const projectId = deliverable.value?.projectId
+  await run(async () => {
+    const ok = await data.deleteDeliverable(deliverableId.value)
+    if (!ok) {
+      toast.error(t('common.saveError'))
+      return
+    }
+    showDelete.value = false
+    if (projectId) await router.replace({ name: 'project', params: { projectId } })
+    else router.back()
   })
 }
 
@@ -432,9 +453,26 @@ onMounted(load)
             :suggestions="[t('meta.aspectRatio'), t('meta.runtime'), t('meta.format'), t('meta.reference'), t('meta.driveFolder'), t('meta.links')]"
           />
         </div>
-        <ModalFooter :label="t('actions.save')" :busy="busy" :disabled="!editName.trim()" @submit="saveEdit" @cancel="showEdit = false" />
+        <div class="flex items-end justify-between gap-2">
+          <!-- Deletes the deliverable AND its stage tasks (server cascade) —
+               for the "created the wrong deliverable" case. -->
+          <button v-if="auth.isManager" type="button" class="rounded-lg px-3 py-2 text-sm" style="color: var(--accent-amber);" @click="showEdit = false; showDelete = true">
+            {{ t('actions.deleteDeliverable') }}
+          </button>
+          <ModalFooter :label="t('actions.save')" :busy="busy" :disabled="!editName.trim()" @submit="saveEdit" @cancel="showEdit = false" />
+        </div>
       </form>
     </Modal>
+
+    <ConfirmDialog
+      :open="showDelete"
+      danger
+      :title="t('actions.deleteDeliverable')"
+      :message="t('actions.deleteDeliverableConfirm', { name: deliverable.name })"
+      :confirm-label="t('actions.delete')"
+      @confirm="confirmDelete"
+      @cancel="showDelete = false"
+    />
 
     <!-- Mark as Delivered modal (manager proxy approval) -->
     <Modal :open="showApproveModal" :title="t('deliverableDetail.markDeliveredTitle')" @close="showApproveModal = false">

@@ -16,8 +16,9 @@ import assert from "node:assert/strict";
 import { getFirestore } from "firebase-admin/firestore";
 import { rebuildStageSummary } from "../src/helpers/deliverableProjections.js";
 import {
-  post, postAnon, clearFirestore, makeUserToken,
+  post, postAnon, del, delAnon, clearFirestore, makeUserToken,
   seedOrg, seedMember, seedUsage, seedClient,
+  seedDeliverable, seedDeliverableVersion, seedTask,
 } from "./helpers.js";
 
 describe("POST /orgs/:orgId/deliverables/batch", () => {
@@ -523,5 +524,131 @@ describe("POST /orgs/:orgId/deliverables/batch", () => {
     });
     assert.equal(res.status, 201);
     assert.equal(res.body.deliverableCount, 50);
+  });
+});
+
+// Deleting a wrongly-created deliverable: cascades to its stage tasks and
+// their subcollections, and decrements activeDeliverables (but never
+// activeTasks — stage tasks were never counted there). Coverage matrix per
+// docs/testing.md.
+describe("DELETE /orgs/:orgId/deliverables/:deliverableId", () => {
+  const ORG = "org-del";
+  const PROJECT = "p-del";
+  let mgrToken: string;
+  let contractorToken: string;
+  let clientToken: string;
+  let unverifiedToken: string;
+
+  beforeEach(async () => {
+    await clearFirestore();
+
+    await seedOrg(ORG, { ownerUid: "u-mgr", deliverableLimit: 100 });
+    await seedMember(ORG, "u-mgr", "admin");
+    await seedMember(ORG, "u-contractor", "contractor");
+    await seedMember(ORG, "u-client", "client", { clientId: "c-del" });
+    // activeTasks seeded non-zero to prove the delete leaves it untouched.
+    await seedUsage(ORG, { activeDeliverables: 1, activeTasks: 4 });
+    await seedClient(ORG, "c-del");
+
+    // One deliverable with three stage tasks + a couple of subcollection docs
+    // to prove the cascade reaches them.
+    await seedDeliverable(ORG, "d-1", {
+      clientId: "c-del", projectId: PROJECT, subGroupId: "sg-del", status: "active",
+    });
+    await seedDeliverableVersion("d-1", "v-1");
+    for (const [i, sid] of ["s_capture", "s_edit", "s_review"].entries()) {
+      await seedTask(ORG, `t-${sid}`, {
+        clientId: "c-del", projectId: PROJECT, subGroupId: "sg-del",
+        deliverableId: "d-1", stageId: sid, order: i,
+      });
+    }
+    // A note under one of the stage tasks — must be gone after the cascade.
+    await getFirestore().doc(`tasks/t-s_capture/notes/n-1`).set({
+      versionId: "", authorUid: "u-mgr", body: "take 2", resolved: false, createdAt: new Date(),
+    });
+
+    mgrToken = await makeUserToken({ uid: "u-mgr", email: "mgr@del.test" });
+    contractorToken = await makeUserToken({ uid: "u-contractor", email: "con@del.test" });
+    clientToken = await makeUserToken({ uid: "u-client", email: "cl@del.test" });
+    unverifiedToken = await makeUserToken({ uid: "u-unverified", email: "unv@del.test", emailVerified: false });
+  });
+
+  it("401 unauthenticated", async () => {
+    const res = await delAnon(`/orgs/${ORG}/deliverables/d-1`);
+    assert.equal(res.status, 401);
+  });
+
+  it("403 unverified email", async () => {
+    const res = await del(`/orgs/${ORG}/deliverables/d-1`, unverifiedToken);
+    assert.equal(res.status, 403);
+  });
+
+  it("403 wrong org (not a member)", async () => {
+    const outsiderToken = await makeUserToken({ uid: "u-outsider", email: "out@del.test" });
+    const res = await del(`/orgs/${ORG}/deliverables/d-1`, outsiderToken);
+    assert.equal(res.status, 403);
+  });
+
+  it("403 contractor role", async () => {
+    const res = await del(`/orgs/${ORG}/deliverables/d-1`, contractorToken);
+    assert.equal(res.status, 403);
+  });
+
+  it("403 client role", async () => {
+    const res = await del(`/orgs/${ORG}/deliverables/d-1`, clientToken);
+    assert.equal(res.status, 403);
+  });
+
+  it("404 when the deliverable does not exist", async () => {
+    const res = await del(`/orgs/${ORG}/deliverables/nope`, mgrToken);
+    assert.equal(res.status, 404);
+  });
+
+  it("404 for another org's deliverable (no cross-org delete by id)", async () => {
+    // A manager of ORG must not delete a deliverable that lives in another org,
+    // even though they can name its id.
+    await seedOrg("org-other", { ownerUid: "u-other" });
+    await seedDeliverable("org-other", "d-other", { status: "active" });
+    const res = await del(`/orgs/${ORG}/deliverables/d-other`, mgrToken);
+    assert.equal(res.status, 404);
+
+    // Untouched.
+    const other = await getFirestore().doc(`deliverables/d-other`).get();
+    assert.ok(other.exists);
+  });
+
+  it("200 cascades to stage tasks + subcollections and decrements activeDeliverables", async () => {
+    const res = await del(`/orgs/${ORG}/deliverables/d-1`, mgrToken);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.deliverableId, "d-1");
+    assert.equal(res.body.taskCount, 3);
+
+    const db = getFirestore();
+
+    // Deliverable + its version subcollection gone.
+    assert.equal((await db.doc(`deliverables/d-1`).get()).exists, false);
+    assert.equal((await db.doc(`deliverables/d-1/versions/v-1`).get()).exists, false);
+
+    // All three stage tasks gone, including the note subcollection.
+    const remaining = await db.collection("tasks").where("deliverableId", "==", "d-1").get();
+    assert.equal(remaining.size, 0);
+    assert.equal((await db.doc(`tasks/t-s_capture/notes/n-1`).get()).exists, false);
+
+    // activeDeliverables decremented; activeTasks untouched (stage tasks were
+    // never counted there).
+    const usage = await db.doc(`orgs/${ORG}/usage/current`).get();
+    assert.equal(usage.get("activeDeliverables"), 0);
+    assert.equal(usage.get("activeTasks"), 4);
+  });
+
+  it("does not decrement activeDeliverables for a non-active deliverable", async () => {
+    // A delivered deliverable is no longer counted (reconcile filters on
+    // status == 'active'), so removing it must leave the counter alone.
+    await getFirestore().doc(`deliverables/d-1`).update({ status: "delivered" });
+    const res = await del(`/orgs/${ORG}/deliverables/d-1`, mgrToken);
+    assert.equal(res.status, 200);
+
+    const usage = await getFirestore().doc(`orgs/${ORG}/usage/current`).get();
+    assert.equal(usage.get("activeDeliverables"), 1);
   });
 });

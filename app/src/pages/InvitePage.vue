@@ -62,7 +62,13 @@ async function loadInvite() {
   else fetchError.value = res.error
   loading.value = false
 }
-onMounted(loadInvite)
+onMounted(() => {
+  // Login can redirect here (?redirect=/invite/…), which leaves the post-login
+  // overlay up. This is a bare route with no workspace data to wait on, so
+  // clear it as soon as we mount (a no-op when reached already signed in).
+  auth.transitioning = false
+  void loadInvite()
+})
 
 // auth.acceptInvite activates the org and routes home itself; on failure the
 // translated message lands in auth.error. The one failure with its own state

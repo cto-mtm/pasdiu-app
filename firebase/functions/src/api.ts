@@ -7,6 +7,7 @@ import { healthRouter } from "./routes/health.js";
 import { billingRouter, billingWebhookHandler } from "./routes/billing.js";
 import { orgsRouter } from "./routes/orgs.js";
 import { deliverablesRouter } from "./routes/deliverables.js";
+import { resourcesRouter } from "./routes/resources.js";
 import { approvalRouter } from "./routes/approval.js";
 import { calendarRouter } from "./routes/calendar.js";
 
@@ -25,9 +26,13 @@ const VALID_ROUTES = [
   "DELETE /orgs/:orgId/members/:uid",
   "POST /orgs/:orgId/reconcile",
   "POST /orgs/:orgId/deliverables/batch",
+  "DELETE /orgs/:orgId/deliverables/:deliverableId",
   "POST /orgs/:orgId/deliverables/:deliverableId/approve",
   "POST /orgs/:orgId/deliverables/:deliverableId/request-changes",
   "POST /orgs/:orgId/deliverables/bulk-approve",
+  "DELETE /orgs/:orgId/subgroups/:subGroupId",
+  "DELETE /orgs/:orgId/projects/:projectId",
+  "DELETE /orgs/:orgId/clients/:clientId",
   "POST /orgs/:orgId/calendar-feed",
   "GET /calendar/:token",
   "GET /billing/config",
@@ -59,6 +64,7 @@ app.use("/health", healthRouter);
 app.use("/billing", billingRouter);
 app.use("/orgs", orgsRouter);
 app.use("/orgs", deliverablesRouter);
+app.use("/orgs", resourcesRouter);
 app.use("/orgs", approvalRouter);
 // Mounted at root: it carries both the authed /orgs/:orgId/calendar-feed
 // creator and the public token-authed /calendar/:token feed.

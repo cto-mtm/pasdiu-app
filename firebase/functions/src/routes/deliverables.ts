@@ -276,3 +276,57 @@ deliverablesRouter.post(
     });
   })
 );
+
+// DELETE /orgs/:orgId/deliverables/:deliverableId
+// Removes a deliverable and cascades to its stage tasks — for the "created the
+// wrong deliverable" case. Server-side because the deliverable rule is
+// `create, delete: if false` (functions only); a client cascade could never
+// touch the deliverable doc, and only the Admin SDK can drop N stage tasks
+// atomically without the per-create counter pairing constraint 1 imposes.
+//
+// A deliverable's stage tasks are the ONLY tasks carrying a non-empty
+// deliverableId (client-created standalone tasks always have ''), and the
+// batch-create endpoint never incremented `activeTasks` for them — so their
+// removal must NOT decrement it (doing so would drive the counter negative).
+// Only `activeDeliverables` moves, and only when the deliverable was still
+// counted as active (mirrors reconcile's `status == "active"` filter).
+deliverablesRouter.delete(
+  "/:orgId/deliverables/:deliverableId",
+  asyncHandler(async (req, res) => {
+    const user = userOf(req);
+    const { orgId, deliverableId } = req.params;
+    const db = getFirestore();
+
+    await requireManagerOf(db, orgId, user.uid);
+
+    const delRef = db.doc(`deliverables/${deliverableId}`);
+    const delSnap = await delRef.get();
+    // Cross-org guard: requireManagerOf only proves membership in :orgId, so a
+    // manager of org A must not delete org B's deliverable by guessing its id.
+    // Both "missing" and "other org" collapse to 404 (no existence oracle).
+    if (!delSnap.exists || delSnap.get("orgId") !== orgId) {
+      throw new ApiError(404, "deliverable_not_found");
+    }
+    const wasActive = delSnap.get("status") === "active";
+
+    // Query by deliverableId alone (a single-field, auto-indexed predicate —
+    // no composite index needed): the id is globally unique, so every match
+    // already belongs to this org.
+    const taskSnap = await db
+      .collection("tasks")
+      .where("deliverableId", "==", deliverableId)
+      .get();
+
+    // recursiveDelete drops each doc AND its versions/notes subcollections.
+    await Promise.all(taskSnap.docs.map((d) => db.recursiveDelete(d.ref)));
+    await db.recursiveDelete(delRef);
+
+    if (wasActive) {
+      await db.doc(`orgs/${orgId}/usage/current`).update({
+        activeDeliverables: FieldValue.increment(-1),
+      });
+    }
+
+    res.json({ orgId, deliverableId, taskCount: taskSnap.size });
+  })
+);

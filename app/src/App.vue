@@ -63,20 +63,31 @@ watch(
 </script>
 
 <template>
-  <!-- Full-page loader: shown during initial auth check (hard refresh on a
-       deep URL) or during the post-login transition until data arrives. -->
-  <FullPageLoader v-if="!auth.initialized || auth.transitioning" />
+  <!-- Initial auth check (hard refresh on a deep URL): until onAuthStateChanged
+       resolves we don't know whether there's a session, so REPLACE the app with
+       the loader — there is no page to mount underneath yet. -->
+  <FullPageLoader v-if="!auth.initialized" />
 
-  <!-- The chrome'd RouterView is keyed on the active org so switching orgs
-       remounts the page even when the route itself doesn't change (otherwise
-       a same-route switch renders the freshly-reset data store as a fake-empty
-       workspace). Bare routes (login/welcome/invite/pricing) stay unkeyed. -->
-  <AppShell v-else-if="chrome">
-    <RouterView :key="auth.activeOrgId ?? 'none'" />
-  </AppShell>
-  <RouterView v-else />
-  <!-- First-login tour: chrome-only, so the /welcome funnel and other bare
-       routes never see it; it opens once the user lands in a workspace. -->
-  <OnboardingTour v-if="chrome && auth.initialized && !auth.transitioning" />
+  <template v-else>
+    <!-- The chrome'd RouterView is keyed on the active org so switching orgs
+         remounts the page even when the route itself doesn't change (otherwise
+         a same-route switch renders the freshly-reset data store as a fake-empty
+         workspace). Bare routes (login/welcome/invite/pricing) stay unkeyed. -->
+    <AppShell v-if="chrome">
+      <RouterView :key="auth.activeOrgId ?? 'none'" />
+    </AppShell>
+    <RouterView v-else />
+
+    <!-- Post-login transition: OVERLAY the loader (it is fixed inset-0) so the
+         landing page still mounts underneath and runs its initial data load —
+         which is exactly what clears `transitioning`. A replacing v-if here
+         would keep that page from ever mounting, so the flag would never clear
+         and the loader would hang until the App.vue safety-net. -->
+    <FullPageLoader v-if="auth.transitioning" />
+
+    <!-- First-login tour: chrome-only, so the /welcome funnel and other bare
+         routes never see it; it opens once the user lands in a workspace. -->
+    <OnboardingTour v-if="chrome && !auth.transitioning" />
+  </template>
   <Toaster />
 </template>

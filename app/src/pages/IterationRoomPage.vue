@@ -533,9 +533,14 @@ onMounted(load)
           />
         </div>
         <div class="flex items-end justify-between gap-2">
-          <button type="button" class="rounded-lg px-3 py-2 text-sm" style="color: var(--accent-amber);" @click="showEditTask = false; showDeleteTask = true">
+          <!-- A deliverable's stage tasks can't be deleted individually — that
+               would break its derived-stage pipeline (delete the deliverable). -->
+          <button v-if="!task.deliverableId" type="button" class="rounded-lg px-3 py-2 text-sm" style="color: var(--accent-amber);" @click="showEditTask = false; showDeleteTask = true">
             {{ t('actions.deleteTask') }}
           </button>
+          <p v-else class="max-w-[16rem] text-xs" style="color: var(--text-muted);">
+            {{ t('actions.deleteTaskInDeliverable') }}
+          </p>
           <ModalFooter :label="t('actions.save')" :busy="busy" @cancel="showEditTask = false" @submit="saveTask" />
         </div>
       </form>
