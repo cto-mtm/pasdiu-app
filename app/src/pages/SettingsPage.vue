@@ -308,7 +308,7 @@ onMounted(() => {
 
         <div v-else-if="billingError" class="mt-3">
           <p class="text-sm" style="color: var(--text-muted);">{{ t(billingError.key, billingError.params ?? {}) }}</p>
-          <button class="mt-2 text-sm underline" style="color: var(--accent-cyan);" @click="loadBillingConfig">
+          <button class="mt-2 text-sm underline" style="color: var(--accent-cyan);" @click="loadBillingConfig()">
             {{ t('common.retry') }}
           </button>
         </div>
@@ -402,7 +402,7 @@ onMounted(() => {
         <div v-else class="mt-3">
           <p class="text-sm font-medium" style="color: var(--accent-amber);">{{ t('settings.healthFailed') }}</p>
           <p v-if="healthError" class="mt-1 text-xs" style="color: var(--text-muted);">{{ t(healthError.key, healthError.params ?? {}) }}</p>
-          <button class="mt-2 text-sm underline" style="color: var(--accent-cyan);" @click="checkHealth">
+          <button class="mt-2 text-sm underline" style="color: var(--accent-cyan);" @click="checkHealth()">
             {{ t('common.retry') }}
           </button>
         </div>

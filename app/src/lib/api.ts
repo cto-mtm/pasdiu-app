@@ -3,12 +3,14 @@
 // Fallbacks:
 //  - dev  → the Firebase Emulator under the offline `demo-app` project id, so
 //           `npm run dev` works even if you forgot to `cp .env.example .env`.
-//  - prod → the deployed Cloud Function (REPLACE_ME project id).
+//  - prod → the deployed Cloud Function on the pasdiu-app project. Prefer
+//           setting VITE_API_URL in app/.env.production; this constant is only
+//           the last-resort fallback so a stray prod build still reaches a real API.
 import { auth } from './firebase'
 import type { BillingConfig, BillingInterval, Plan, Role } from './types'
 
 const DEV_FALLBACK = 'http://127.0.0.1:5001/demo-app/us-east5/api'
-const PROD_FALLBACK = 'https://us-east5-REPLACE_ME.cloudfunctions.net/api'
+const PROD_FALLBACK = 'https://us-east5-pasdiu-app.cloudfunctions.net/api'
 
 const BASE_URL =
   import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? DEV_FALLBACK : PROD_FALLBACK)

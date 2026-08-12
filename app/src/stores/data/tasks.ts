@@ -60,7 +60,10 @@ export function createTasksSlice(ctx: DataContext) {
   }
 
   // ── All tasks (All Tasks page + omni-search; managers/contractors) ────
-  async function loadAllTasks(): Promise<void> {
+  // `force` is accepted for loadWorkspace's uniform signature — a live listener
+  // has nothing to force (same as loadUsers/loadClients).
+  async function loadAllTasks(force = false): Promise<void> {
+    void force
     const orgId = requireOrgId()
     return listen('tasks', query(
       collection(db, 'tasks'),

@@ -2,7 +2,7 @@
 
 ## How the pieces fit together
 
-Vite builds the SPA into `app/dist/`. `scripts/deploy.sh` copies that `dist/` into `firebase/app/`, where Firebase Hosting serves it with an SPA rewrite (`** → /index.html`). The **same** `dist/` is what Capacitor packages into the iOS/Android shells (`webDir: 'dist'`), so the browser build and the native build are byte-identical.
+Vite builds the SPA into `app/dist/`. `scripts/deploy.mjs` (run via `npm run deploy`) copies that `dist/` into `firebase/app/`, where Firebase Hosting serves it with an SPA rewrite (`** → /index.html`). The **same** `dist/` is what Capacitor packages into the iOS/Android shells (`webDir: 'dist'`), so the browser build and the native build are byte-identical.
 
 The app talks to a single Cloud Function (`api`) over JSON. That function has a CORS allow-list that includes both the web origins and the Capacitor origins (`capacitor://localhost`, `http://localhost`), so the same API serves web and native without change.
 

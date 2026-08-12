@@ -6,7 +6,7 @@ firebase-debug*.log*
 # Firebase
 .firebase/
 firebase/.firebase/
-# Deploy staging: app/dist/ is copied here by scripts/deploy.sh — never commit it.
+# Deploy staging: app/dist/ is copied here by scripts/deploy.mjs — never commit it.
 firebase/app/
 # Compiled Cloud Functions output
 firebase/functions/lib/
@@ -22,6 +22,9 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Local deploy ledger (appended by scripts/deploy.mjs) — machine-local history
+deploys/LEDGER.md
 
 # OS / editor
 .DS_Store

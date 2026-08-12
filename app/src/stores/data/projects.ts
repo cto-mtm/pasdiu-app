@@ -40,8 +40,11 @@ export function createProjectsSlice(ctx: DataContext) {
   }
 
   // Live listener over the first PAGE_SIZE projects by document id;
-  // loadMoreProjects appends past the window with one-shot reads.
-  async function loadAllProjects(): Promise<void> {
+  // loadMoreProjects appends past the window with one-shot reads. `force` is
+  // accepted for loadWorkspace's uniform signature — live data has nothing to
+  // force (same as loadUsers/loadClients).
+  async function loadAllProjects(force = false): Promise<void> {
+    void force
     const orgId = requireOrgId()
     return listen('projects', query(
       collection(db, 'projects'),

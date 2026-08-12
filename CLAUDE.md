@@ -14,7 +14,7 @@
 - Cloud Functions bundler: `firebase/functions/esbuild.mjs` bundles TypeScript and inlines `@pasdiu/shared` into `lib/index.js` while keeping runtime dependencies external.
 - **Do not** run `vite build`, `npm run build`, `cap sync`, or any build commands unless explicitly asked.
 - **Do not** prompt the user asking if they would like to run a build.
-- The dev server (`npm run dev`) and the Firebase emulators (`npm run emulators` in `firebase/`) are managed by the user separately.
+- The dev server (`npm run dev` in `app/`) and the Firebase emulators (`npm run emulators` in `firebase/`) are managed by the user separately.
 - Local dev never needs a real Firebase project — the emulators run offline under the `demo-app` project id.
 - Use `npm` as the package manager (not yarn or pnpm).
 

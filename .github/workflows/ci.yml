@@ -1,0 +1,32 @@
+# Monorepo CI — headless checks only (typecheck + build).
+#
+# The integration suite (supertest against the Firestore + Auth emulators)
+# deliberately does NOT run here: it boots emulators and runs as the pre-deploy
+# gate in scripts/deploy.mjs (`npm run test:integration:exec`). CI stays fast and
+# hermetic — typecheck covers shared + functions + app (esbuild does not
+# typecheck the functions bundle); build proves everything compiles.
+name: ci
+
+on:
+  pull_request:
+    paths: ['shared/**', 'app/**', 'firebase/**', '.github/workflows/ci.yml']
+  push:
+    branches: [main]
+    paths: ['shared/**', 'app/**', 'firebase/**', '.github/workflows/ci.yml']
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build

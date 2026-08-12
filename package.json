@@ -9,13 +9,17 @@
   ],
   "scripts": {
     "build:shared": "npm run build -w shared",
-    "build:app": "npm run build -w app",
-    "build:functions": "npm run build -w firebase/functions",
-    "build": "npm run build:shared && npm run build:app && npm run build:functions",
+    "build:app": "npm run build:shared && npm run build -w app",
+    "build:functions": "npm run build:shared && npm run build -w firebase/functions",
+    "build": "npm run build:shared && npm run build -w app && npm run build -w firebase/functions",
+    "typecheck": "npm run build:shared && npm run typecheck -w firebase/functions && npm run typecheck -w app",
     "deploy": "node scripts/deploy.mjs",
     "deploy:hosting": "node scripts/deploy.mjs --only hosting",
     "deploy:functions": "node scripts/deploy.mjs --only functions",
     "test:functions": "npm run test -w firebase/functions",
-    "test": "npm run test:functions"
+    "test": "npm run test:functions",
+    "test:integration:exec": "node scripts/lib/kill-emulator-ports.mjs && npm run build:shared && npm --prefix firebase run test:integration",
+    "clean": "node scripts/clean-deps.mjs",
+    "clean:install": "npm run clean && npm install && npm run build:shared"
   }
 }

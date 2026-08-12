@@ -1,78 +1,190 @@
-import { execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { execSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { stage } from './lib/stage.mjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const ROOT = path.resolve(__dirname, '..');
+// ─── Per-app config ─────────────────────────────────────────────────────
+// The only block that differs between dirumed / teremu / pasdiu. Everything
+// below it is the shared pipeline.
+const CONFIG = {
+  appName: 'Pasdiu',
+  // .firebaserc location, relative to repo root. Pasdiu keeps it at the root.
+  firebasercPath: '.firebaserc',
+  // How to invoke `firebase deploy`. `cwd` is where it runs (relative to root);
+  // `extraArgs` carries app-specific flags. Pasdiu's .firebaserc is at the root
+  // while firebase.json lives in firebase/, so it deploys from '.' and points
+  // the CLI at the nested config; --project default resolves via .firebaserc.
+  deploy: { cwd: '.', extraArgs: '--config firebase/firebase.json --project default' },
+  // Built SPA → Hosting public dir (firebase.json's hosting.public = "app",
+  // resolved relative to firebase/).
+  hostingSrc: 'app/dist',
+  hostingDest: 'firebase/app',
+  // Prod env sanity check — Vite loads .env.production on `vite build`. Pasdiu's
+  // prod API URL comes from VITE_API_URL; without it the build falls back to the
+  // PROD_FALLBACK constant in app/src/lib/api.ts. Set to null to skip.
+  prodEnvCheck: { path: 'app/.env.production', key: 'VITE_API_URL' },
+  // Build commands per deploy scope. `full` runs for a normal deploy;
+  // `hosting`/`functions` run for the matching `--only` target.
+  build: {
+    full: 'npm run build',
+    hosting: 'npm run build:app',
+    functions: 'npm run build:functions',
+  },
+  // Pre-deploy test gate — array of commands run (in order) before anything
+  // ships. Pasdiu's integration suite (supertest) runs against the Firestore +
+  // Auth emulators, so the gate uses the self-contained `test:integration:exec`
+  // (kills stale ports → builds shared → boots emulators one-shot → vitest).
+  // Empty array = no gate. Skip with --skip-tests.
+  testGate: ['npm run test:integration:exec'],
+  // test:integration:exec already frees the ports itself, so no extra kill here.
+  killEmulatorPorts: false,
+};
+// ────────────────────────────────────────────────────────────────────────
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(__dirname, '..');
+const deployStarted = Date.now();
+
+// ─── CLI flags ──────────────────────────────────────────────────────────
+// --only hosting|functions  → deploy just that target
+// --skip-tests              → bypass the pre-deploy gate (emergency redeploy)
 const args = process.argv.slice(2);
-const onlyIndex = args.indexOf('--only');
-const onlyTarget = onlyIndex !== -1 ? args[onlyIndex + 1] : null;
+const onlyIdx = args.indexOf('--only');
+const onlyTarget = onlyIdx !== -1 ? args[onlyIdx + 1] : null;
+const skipTests = args.includes('--skip-tests');
 
-console.log('🚀 Starting Pasdiu deployment pipeline...\n');
-
-// 1. Verify .firebaserc & extract project ID
-const firebasercPath = path.join(ROOT, '.firebaserc');
-const firebasercContent = JSON.parse(fs.readFileSync(firebasercPath, 'utf8'));
-const projectId = firebasercContent.projects?.default;
-
-if (!projectId || projectId.includes('REPLACE_ME')) {
-  console.error('✖ .firebaserc contains an invalid or placeholder project ID. Set your real Firebase project ID first.');
+if (onlyTarget && !['hosting', 'functions'].includes(onlyTarget)) {
+  console.error(`ERROR: --only must be 'hosting' or 'functions' (got '${onlyTarget}').`);
   process.exit(1);
 }
-
-// Warn if VITE_API_URL is missing — a prod build without it has a dead API.
-const appEnvPath = path.join(ROOT, 'app', '.env');
-if (fs.existsSync(appEnvPath)) {
-  const envContent = fs.readFileSync(appEnvPath, 'utf8');
-  if (!envContent.includes('VITE_API_URL=')) {
-    console.warn('⚠  VITE_API_URL is not set in app/.env — the production build will use the REPLACE_ME fallback and API calls will fail.\n');
-  }
-} else {
-  console.warn('⚠  app/.env does not exist — VITE_API_URL is unset. API calls will fail in production.\n');
-}
-
-const exec = (cmd, cwd = ROOT) => {
-  console.log(`> ${cmd}`);
-  execSync(cmd, { cwd, stdio: 'inherit' });
-};
-
 const isHostingOnly = onlyTarget === 'hosting';
 const isFunctionsOnly = onlyTarget === 'functions';
 
-// 2. Build frontend assets if deploying hosting or full deployment
+function run(cmd, cwd = root) {
+  console.log(`Executing: ${cmd}${cwd !== root ? ` in ${cwd}` : ''}`);
+  execSync(cmd, { cwd, stdio: 'inherit' });
+}
+
+console.log(`\n🚀 ${CONFIG.appName} deploy — ${onlyTarget ? `--only ${onlyTarget}` : 'full deployment'}\n`);
+
+// ─── 1. Guard: .firebaserc must exist and carry a real project id ────────
+const firebasercPath = path.join(root, CONFIG.firebasercPath);
+if (!fs.existsSync(firebasercPath)) {
+  console.error(`ERROR: ${CONFIG.firebasercPath} not found!`);
+  process.exit(1);
+}
+if (fs.readFileSync(firebasercPath, 'utf8').includes('REPLACE_ME')) {
+  console.error(`ERROR: ${CONFIG.firebasercPath} still contains REPLACE_ME — set the real Firebase project id first.`);
+  process.exit(1);
+}
+
+// ─── 2. Warn if the prod env file is missing a required key ──────────────
+if (CONFIG.prodEnvCheck && !isFunctionsOnly) {
+  const { path: rel, key } = CONFIG.prodEnvCheck;
+  const envPath = path.join(root, rel);
+  if (!fs.existsSync(envPath)) {
+    console.warn(`⚠  ${rel} does not exist — ${key} is unset; the production build may be broken.\n`);
+  } else if (!fs.readFileSync(envPath, 'utf8').includes(`${key}=`)) {
+    console.warn(`⚠  ${key} is not set in ${rel} — the production build may be broken.\n`);
+  }
+}
+
+// ─── 3. Pre-deploy test gate ─────────────────────────────────────────────
+if (CONFIG.testGate.length === 0) {
+  // No gate configured for this app.
+} else if (skipTests) {
+  console.warn('\n⚠️ WARNING: --skip-tests — deploying WITHOUT the pre-deploy test gate.\n');
+} else {
+  if (CONFIG.killEmulatorPorts) {
+    run('node scripts/lib/kill-emulator-ports.mjs');
+  }
+  CONFIG.testGate.forEach((cmd, i) => {
+    const s = stage(`Pre-deploy gate ${i + 1}/${CONFIG.testGate.length}: ${cmd}`);
+    run(cmd);
+    s.done('passed');
+  });
+}
+
+// ─── 4. Build ────────────────────────────────────────────────────────────
+let s;
+if (isHostingOnly) {
+  s = stage('Build (shared + app)');
+  run(CONFIG.build.hosting);
+  s.done();
+} else if (isFunctionsOnly) {
+  s = stage('Build (shared + functions)');
+  run(CONFIG.build.functions);
+  s.done();
+} else {
+  s = stage('Build (shared + app + functions)');
+  run(CONFIG.build.full);
+  s.done();
+}
+
+// ─── 5. Stage the built SPA into Hosting's public dir ────────────────────
 if (!isFunctionsOnly) {
-  console.log('📦 Step: Building @pasdiu/shared...');
-  exec('npm run build -w shared');
-
-  console.log('\n🎨 Step: Building Vue web application...');
-  exec('npm run build -w app');
-
-  console.log('\n📁 Step: Staging app/dist for Firebase Hosting...');
-  const targetDir = path.join(ROOT, 'firebase', 'app');
-  if (fs.existsSync(targetDir)) {
-    fs.rmSync(targetDir, { recursive: true, force: true });
+  s = stage('Stage files for hosting');
+  const dest = path.join(root, CONFIG.hostingDest);
+  if (fs.existsSync(dest)) {
+    fs.rmSync(dest, { recursive: true, force: true });
   }
-  fs.mkdirSync(targetDir, { recursive: true });
-  fs.cpSync(path.join(ROOT, 'app', 'dist'), targetDir, { recursive: true });
-  console.log('✔ Staged dist to firebase/app');
+  fs.mkdirSync(dest, { recursive: true });
+  fs.cpSync(path.join(root, CONFIG.hostingSrc), dest, { recursive: true });
+  s.done(`copied ${CONFIG.hostingSrc} → ${CONFIG.hostingDest}`);
 }
 
-// 3. Build functions if deploying functions or full deployment
-if (!isHostingOnly) {
-  if (isFunctionsOnly) {
-    console.log('📦 Step: Building @pasdiu/shared...');
-    exec('npm run build -w shared');
+// ─── 6. Deploy ────────────────────────────────────────────────────────────
+s = stage(`Deploy${onlyTarget ? ` (--only ${onlyTarget})` : ''}`);
+const onlyFlag = onlyTarget ? `--only ${onlyTarget}` : '';
+const deployArgs = [onlyFlag, CONFIG.deploy.extraArgs].filter(Boolean).join(' ');
+run(`npx firebase deploy ${deployArgs}`.trim(), path.join(root, CONFIG.deploy.cwd));
+s.done('deployed');
+
+const totalMin = ((Date.now() - deployStarted) / 60000).toFixed(1);
+console.log(`\n✔ Done in ${totalMin} min. Tip: 'npm install' at the repo root restores the workspace links for local dev.`);
+
+// ─── 7. Append to the deploy ledger ──────────────────────────────────────
+const ledgerPath = path.join(root, 'deploys', 'LEDGER.md');
+try {
+  if (!fs.existsSync(path.dirname(ledgerPath))) {
+    fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
   }
-  console.log('\n⚡ Step: Building Cloud Functions...');
-  exec('npm run build -w firebase/functions');
+  const sha = execSync('git rev-parse --short HEAD', { cwd: root, encoding: 'utf8' }).trim();
+  const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: root, encoding: 'utf8' }).trim();
+  const subject = execSync('git log -1 --format=%s', { cwd: root, encoding: 'utf8' }).trim();
+  const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+  const entry = [
+    `## ${timestamp}`,
+    '',
+    `- **SHA:** \`${sha}\` (${branch})`,
+    `- **Commit:** ${subject}`,
+    `- **Scope:** ${onlyTarget ? `--only ${onlyTarget}` : 'full (hosting + functions)'}`,
+    `- **Tests:** ${CONFIG.testGate.length === 0 ? 'n/a (no gate)' : skipTests ? '⚠️ skipped (--skip-tests)' : '✅ gate passed'}`,
+    `- **Duration:** ${totalMin} min`,
+    '',
+    '---',
+    '',
+  ].join('\n');
+
+  // Insert newest-first, right after the header's first `---`.
+  if (fs.existsSync(ledgerPath)) {
+    const content = fs.readFileSync(ledgerPath, 'utf8');
+    const marker = '---\n';
+    const insertAt = content.indexOf(marker);
+    if (insertAt !== -1) {
+      const before = content.slice(0, insertAt + marker.length);
+      const after = content.slice(insertAt + marker.length);
+      fs.writeFileSync(ledgerPath, before + '\n' + entry + after);
+    } else {
+      fs.appendFileSync(ledgerPath, '\n' + entry);
+    }
+  } else {
+    fs.writeFileSync(ledgerPath, `# Deploy Ledger\n\nNewest first.\n\n---\n\n${entry}`);
+  }
+  console.log('📋 Ledger updated: deploys/LEDGER.md');
+} catch (e) {
+  // Non-fatal — don't fail the deploy over ledger bookkeeping.
+  console.warn(`⚠️ Could not update deploy ledger: ${e.message}`);
 }
-
-// 4. Deploy to Firebase
-const deployFlag = onlyTarget ? `--only ${onlyTarget}` : '';
-console.log(`\n🔥 Deploying to Firebase project '${projectId}' (${onlyTarget ? `--only ${onlyTarget}` : 'Full Deployment'})...`);
-exec(`npx firebase deploy ${deployFlag} --config firebase/firebase.json --project ${projectId}`, ROOT);
-
-console.log('\n🎉 Deployment complete!');

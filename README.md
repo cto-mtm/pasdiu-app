@@ -231,8 +231,8 @@ The API CORS allow-list already includes the Capacitor origins (`capacitor://loc
 ## Deploy
 
 1. Set the real project id in `.firebaserc`.
-2. Set `VITE_API_URL` for prod in `app/.env` (e.g. `https://us-central1-<project>.cloudfunctions.net/api`). Without it the build falls back to the `PROD_FALLBACK` constant in `app/src/lib/api.ts`, which still contains a `REPLACE_ME` project id — the deploy scripts do not catch this, so a prod build shipped without `VITE_API_URL` has a dead API.
-3. Run `./scripts/deploy.sh` — the one true deploy path (build → stage `dist/` into `firebase/app/` → `firebase deploy`).
+2. Set `VITE_API_URL` for prod in `app/.env.production` (e.g. `https://us-east5-pasdiu-app.cloudfunctions.net/api`) — Vite loads `.env.production` on a prod build. If it's missing, the build falls back to the `PROD_FALLBACK` constant in `app/src/lib/api.ts` (now the real project URL), and `npm run deploy` warns before shipping.
+3. Run `npm run deploy` — the one true deploy path: pre-deploy test gate → build (shared + app + functions) → stage `dist/` into `firebase/app/` → `firebase deploy` → append `deploys/LEDGER.md`. Use `npm run deploy:hosting` / `deploy:functions` to target one, and `node scripts/deploy.mjs --skip-tests` for an emergency redeploy.
 
 ## Security rules & testing
 
