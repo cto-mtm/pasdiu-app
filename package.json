@@ -1,6 +1,10 @@
 {
   "name": "pasdiu-monorepo",
   "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "workspaces": [
     "shared",
     "app",
@@ -13,6 +17,8 @@
     "build:functions": "npm run build:shared && npm run build -w firebase/functions",
     "build": "npm run build:shared && npm run build -w app && npm run build -w firebase/functions",
     "typecheck": "npm run build:shared && npm run typecheck -w firebase/functions && npm run typecheck -w app",
+    "dev": "npm run build:shared && npm run dev -w app",
+    "emulators": "npm run build:shared && npm --prefix firebase run emulators",
     "deploy": "node scripts/deploy.mjs",
     "deploy:hosting": "node scripts/deploy.mjs --only hosting",
     "deploy:functions": "node scripts/deploy.mjs --only functions",
