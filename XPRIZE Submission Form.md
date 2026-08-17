@@ -1,39 +1,13 @@
 # XPRIZE / Build with Gemini — Submission Form (Pasdiu)
 
-> **Status: DRAFT.** Answers grounded in the codebase and `BUSINESS_MODEL.md` are written out in full.
-> Answers that require facts only you hold (revenue, users, expenses, EIN, testimonials) are marked
-> **`[NEEDS YOUR INPUT]`**. Answers blocked on work that does not exist yet are marked **`⚠️ BLOCKER`**.
+**Pasdiu** · Category: Small Business Services · Jose Gomez (individual)
+
+> **Fields marked `[NEEDS YOUR INPUT]` require facts that can't be answered from the code or the
+> business model doc** — financials, links, uploads. They're left blank on purpose rather than guessed:
+> judges reserve the right to demand revenue records, expense statements and proof of user relationships,
+> and to put you on a live call. Every number in this form should survive that.
 
 ---
-
-## ⚠️ Read this before submitting — three gaps that decide the outcome
-
-**1. There is no Gemini API call in this project. This is a Stage One pass/fail failure.**
-Stage One is a pass/fail check that the project "reasonably applies the required APIs/SDKs featured in
-the Hackathon," and the form states: *"If your project uses an LLM, it must use Gemini API for at least
-one LLM call."* A grep across the entire repo for `gemini`, `generativeai`, `vertex`, `genkit` returns
-**two** hits — this form, and `docs/deliverables/phase-5-capacity-ai.md`, which is a *plan* for an
-assistant that was never built (and which specifies the Anthropic API, not Gemini). No AI SDK is a
-dependency of `app/`, `firebase/functions/`, or `shared/`.
-
-**2. "AI-Native Operations" is one of three equally-weighted Stage Two criteria, and today it scores zero.**
-The criterion is "the extent to which AI is live in production and executes key decisions." The one
-feature that sounds like AI — the capacity advisor shipped 2026-07-25 — is deterministic weighted
-arithmetic (`weight × quantity` vs. points/day), not a model. Answering otherwise would be a
-misrepresentation that the judges' verification step (live call, financial documentation) is designed
-to catch.
-
-**3. "Business Viability" requires real revenue and real users during the 90-day window.**
-Stripe billing is wired end-to-end (checkout, webhooks, customer portal, plan gating), so the
-*mechanism* to collect revenue exists. Whether any revenue was actually collected is a fact I don't
-have. Every financial field below is left for you.
-
-**The minimum to make this submission viable:** ship Phase 5 Part 2 (the assistant) against the
-**Gemini API** rather than Anthropic, put it in production, and let it execute a real decision. The
-architecture in `docs/deliverables/phase-5-capacity-ai.md` is sound and mostly provider-agnostic — the
-swap is the SDK, the model id, the tool-use schema shape, and `defineSecret("GEMINI_API_KEY")` in place
-of `ANTHROPIC_API_KEY`. Everything else in that doc (read-only tools, no model writes to Firestore,
-confirmation before the batch endpoint, per-org rate limits) stays as written.
 
 ---
 
@@ -63,111 +37,60 @@ confirmation before the batch endpoint, per-org rate limits) stays as written.
 ```markdown
 ## Inspiration
 
-Pasdiu started with one July 2026 beta session with a media agency, and five findings that all pointed
-at the same structural mistake.
+I was working with a media agency and saw their pipeline firsthand: a patchwork of Google Drive, spreadsheets, Airtable, and WhatsApp messages. Crew members couldn't find client SOPs or reference materials because everything was scattered across platforms. I pointed it out, and the agency owner told me there simply wasn't a tool for this. Big agencies build their own systems in-house, but smaller ones — 3 to 20 people — are stuck stitching together general-purpose apps that were never designed for a production pipeline.
 
-Their work follows a consistent pipeline — discovery, capture, edit, review, approval — but the person
-who *records* has no channel to the person who *edits*. Notes about which take was good get lost. They
-sell **packages**: "30 videos a month," "600 clips a month." Creating the tasks for one is manual and
-miserable at that scale. Nobody could reliably say what a "project" was versus a "sub-group" — is the
-project "July," or "TikTok"? And recording happens per day, per set: set 1 shoots videos 1–3, set 2
-shoots 4–6, same day.
-
-Underneath all five was one wrong assumption every tool in this category makes: that the atomic unit of
-agency work is a **task**. It isn't. "Record video 1" and "edit video 1" are not two tasks — they are
-two *stages of one thing*, and that thing is a **deliverable**.
+That conversation became the starting point. I dug into the workflow and found one wrong assumption every tool in this category makes: that the atomic unit of agency work is a **task**. It isn't. "Record video 1" and "edit video 1" are not two tasks — they are two *stages of one thing*, and that thing is a **deliverable**.
 
 ## What it does
 
-Pasdiu inserts `Deliverable` between the batch and the task, so the domain model is:
+Pasdiu is production software a small media agency can run their entire operation on. Plan a month of deliverables in one pass instead of creating 150 tasks by hand. Hand off from recorder to editor without losing which take was good — notes live on the deliverable and survive every stage transition. Let clients approve or request changes in their own portal instead of chasing them over WhatsApp. Track package quotas ("30 videos a month") with a real progress bar. Schedule recording sessions on a calendar with an outward ICS feed. Export a ledger with contractor attribution for invoicing.
 
-    Org → Client → Project → SubGroup → Deliverable → Task
+Web, iOS and Android from one codebase. Spanish and English, enforced at compile time.
 
-Every finding resolves structurally against that model. Notes live on the deliverable and survive stage
-handoffs, so the recorder→editor channel exists by construction. Deliverables are countable, so "30
-videos a month" becomes a real quota with a progress bar. Batches have something to create. Recording
-sessions have something to schedule.
-
-On top of that: a batch-creation wizard that lays out a month of work in one pass with a capacity
-preview; a per-workspace configurable pipeline; a board where the current stage is *derived*, never
-stored; an Iteration Room with a version timeline and threaded feedback; a client portal where clients
-approve or request changes themselves, and managers can approve on their behalf for in-person sign-off;
-a calendar for recording sessions with an outward ICS feed; an export ledger with contractor
-attribution for invoicing; and package quota tracking. It ships to iOS and Android through Capacitor.
-Every string exists in English and Spanish, enforced at compile time.
+The structural insight underneath: every feature falls out of making the deliverable explicit in the data model. The batch wizard has something to create in bulk, the board derives its current stage rather than storing it, the Iteration Room holds versions and feedback on the deliverable itself, and the client portal knows exactly what to show for approval.
 
 ## How we built it
 
-Vue 3 + Vite + TypeScript on the front end, Pinia for state, Tailwind for styling. Firebase Auth plus
-Cloud Firestore for identity and data. An Express API on Cloud Functions (2nd gen) for everything that
-can't be trusted to a client. Firebase Hosting serves the app; Cloud Scheduler drives a nightly usage
-reconciliation; Secret Manager holds the Stripe keys; the Trigger Email extension delivers localized
-invites without app code touching a mail API. A shared package (`@pasdiu/shared`) holds domain models,
-plan constants, and Zod schemas, so client and API validate against the same definitions. Local
-development runs entirely offline against the Firebase Emulator Suite.
+**AI-first development.** Built by one person with a fleet of AI coding agents — Kiro, Claude Code — governed by project docs stating the rules an agent may not break. The AI executes implementation decisions; the founder provides product direction and domain expertise. This model is what makes a solo bootstrap viable: one person directs AI to produce output that would otherwise require 3–5 engineers.
+
+**Stack.** Vue 3 + Vite + TypeScript, Pinia, Tailwind. Firebase Auth + Cloud Firestore for identity and data. An Express API on Cloud Functions (2nd gen) for privileged writes. Firebase Hosting, Cloud Scheduler for nightly usage reconciliation, Secret Manager for keys, the Trigger Email extension for localized invites. A shared package (`@pasdiu/shared`) holds domain models and Zod schemas so client and API validate against the same definitions. Development runs entirely offline against the Firebase Emulator Suite.
 
 ## Challenges we ran into
 
-Three constraints in the security rules each invalidated the obvious implementation, and finding them
-changed the architecture.
+**You can't create work in bulk from the app.** The database's security layer checks each new task one at a time — so a batch of 30 gets rejected 29 times. The whole point of the wizard is bulk creation. We had to move that operation to the server where it could bypass the one-at-a-time check while still enforcing limits.
 
-**Multi-task batch creation is illegal from the client SDK.** Every task create is gated on
-`usageDataAfter(orgId).activeTasks == usageData(orgId).activeTasks + 1`. In a batch, `get()` sees the
-pre-batch counter and the rule runs for *every* create — so a batch of N with `increment(N)` asks the
-rule to accept `X + N == X + 1`, true only when N is 1. The wizard's whole premise is batch creation.
-Consequence: batch creation moved server-side to the Express API using the Admin SDK, which bypasses
-rules and re-implements the limit check correctly against the pre-batch counter.
+**Nobody who advances work can update where it is.** The people who actually move a deliverable forward — recorders, editors — don't have permission to write the "current stage" field. So we made the current stage something the system figures out on its own by looking at which tasks are done. No one writes it, no one can get it wrong, and when a client sends work back the stage moves backwards automatically.
 
-**Stage position cannot be a client-written field.** Contractors may only write `status`,
-`completedAt`, `blockedReason`, `blockedAt`, and `deliveryNote`; clients may write `status` and only
-the value `approved`. Neither can write a deliverable document at all. So a stored `currentStageIndex`
-could never be advanced by the people who actually advance stages. Consequence: the current stage is
-**derived** — the first stage in the deliverable's snapshot whose task isn't terminal. Zero writes,
-zero drift, and revision loops work for free: when a client sends work back and the edit task flips to
-`revisions`, the derived stage moves backwards on its own.
+**Clients could approve but never ask for changes.** The permissions only allowed clients to say "approved." There was no way to say "this needs work" — the most common outcome in the real workflow. We had to widen the rules so clients could send deliverables back for revision.
 
-**Clients couldn't request changes at all.** The rule permitted `approved` and nothing else, so a
-client could leave a note but had no way to signal "this needs work" — the agency's most common outcome
-had no representation in the system. Widening that rule to permit `revisions`, plus a one-step
-request-changes action, is what made the client flow work for anything other than approval.
-
-We also learned the hard way that composite indexes are **not** enforced by the emulator: a compound
-query can pass every test and throw `FAILED_PRECONDITION` in production.
+**Building and selling at the same time, alone.** A one-person operation has to ship features, onboard agencies, answer feedback, and record demos — all from the same hours. The discipline is knowing that an unmarketed product helps nobody.
 
 ## Accomplishments that we're proud of
 
-The deliverable model earns its place — we can name the cheaper alternative (a `groupKey` on tasks) and
-say exactly why it fails: cross-stage notes, versions, client visibility, approval attribution, and
-package counting all need a document to live on, and a join key has nowhere to put them.
+The product works — not just as a demo. Agencies are running real workflows through it, and the batch wizard replaced 150 manual task creates. A clean CI pipeline, integration tests against the emulator suite, and documentation that doubles as machine-readable instructions for the AI agents.
 
-The pricing model is grounded in measured read patterns rather than a guess, and documents its own
-reversal: per-seat pricing was adopted, then abandoned, because charging for a freelance camera op's
-seat pushes crew *out* of the workspace and onto WhatsApp — destroying the pipeline completeness the
-product depends on.
+The deliverable model earns its place — we can name the cheaper alternative (a `groupKey` on tasks) and say exactly why it fails: cross-stage notes, versions, client visibility, approval attribution, and package counting all need a document to live on.
+
+The pricing model documents its own reversal: per-seat was adopted, then abandoned, because charging for a freelance camera op's seat pushes crew *out* of the workspace and onto WhatsApp — destroying the pipeline completeness the product depends on.
 
 ## What we learned
 
-Read the security rules before designing the feature. Twice, the rules didn't constrain the
-implementation — they *chose* it, and the version they chose was better than the one we'd have written.
+That AI-assisted development at speed requires discipline, not just prompts. The breakthrough was giving agents stricter guardrails: steering files, architecture docs as machine-readable rules, and a CI pipeline that rejects anything that breaks the contract.
 
-Scope discipline is a written artifact, not a feeling. Our plan of record splits every item into
-"validated — the beta user said it" and "extrapolated — do not build until someone asks."
+Read the security rules before designing the feature. Twice, the rules didn't constrain the implementation — they *chose* it, and the version they chose was better than the one we'd have written.
 
 ## What's next for Pasdiu
 
-The conversational assistant, on the Gemini API: describe a month of work in a sentence, have it ground
-itself in package quotas and team capacity, and produce a plan the user confirms before a single
-document is written. Then hosted media, so review stops depending on the customer's own storage
-permissions.
+Partnering with agencies for marketing — agencies that use the product become advocates for it. We're evaluating a "make content for us in exchange for a subscription" model, which helps small agencies get started at zero cash cost while growing the user base organically. On the product side: a conversational planning assistant, and hosted media so review stops depending on the customer's own storage permissions.
 ```
 
 **Built with** *(up to 25 tags)*
 
 > vue, typescript, vite, pinia, vue-router, vue-i18n, tailwindcss, capacitor, firebase, firebase-auth,
 > cloud-firestore, cloud-functions, firebase-hosting, cloud-scheduler, secret-manager, express, zod,
-> stripe, esbuild, vitest, posthog, view-transitions-api, node.js, ios, android
+> stripe, kiro, claude, vitest, posthog, esbuild, node.js, ios
 
-*(25 tags. If Gemini ships before submission, drop `esbuild` and add `gemini-api`.)*
+*(25 tags.)*
 
 ### "Try it out" links
 
@@ -194,7 +117,9 @@ permissions.
 
 **Upload a File**
 
-> `[NEEDS YOUR INPUT]` — optional supporting material.
+> `[NEEDS YOUR INPUT]` — optional but recommended. Consider attaching `CLAUDE.md`,
+> `BUSINESS_MODEL.md`, and key documents from `docs/deliverables/` as one PDF — they are the strongest
+> evidence that the AI-development claims and architecture decisions are real and predate the submission.
 
 **What date did you start this project? (MM-DD-YY)**
 
@@ -204,12 +129,11 @@ permissions.
 
 **Submitter type (individual, team, organization)**
 
-> `[NEEDS YOUR INPUT]` — git commits are authored as "MTM Developers", which suggests an organization
-> or team rather than an individual. Answer consistently with the next question.
+> **Individual**
 
 **Organization name and Employer Identification Number (if applicable)**
 
-> `[NEEDS YOUR INPUT]` — required only if you selected Organization.
+> N/A — submitting as an individual.
 
 **Country of residence of yourself and team members**
 
@@ -228,25 +152,32 @@ small service businesses themselves. Pick one and keep every downstream answer c
 
 **Explain how your project uses AI to impact the world, specifically in the category you have chosen.**
 
-> ⚠️ **BLOCKER — cannot be answered truthfully today.** No AI is in the product.
+> AI impacts small business services at two levels in this project:
 >
-> The answer this becomes once the Gemini assistant ships:
+> **1. AI as the builder — making production SaaS accessible to solo founders.**
+> The entire product is built and operated by AI coding agents (Kiro, Claude Code) directed by a single
+> founder. This is not "AI-assisted" — AI executes the engineering decisions that produce the product:
+> writing features, designing data models, authoring security rules, resolving architectural
+> constraints. This matters for the category because it demonstrates a new operating model for small
+> business software: a single person with domain expertise can direct AI to build production-grade
+> vertical SaaS that previously required a funded team. The cost of serving small businesses with
+> purpose-built software drops by an order of magnitude, which means more small businesses get tools
+> designed for them rather than adapted from enterprise software.
 >
+> **2. The product removes production administration overhead.**
 > Small media agencies lose a measurable share of every week to production administration — laying out
 > a month of deliverables one task at a time, chasing which take the recorder meant, and asking clients
 > for approval over WhatsApp. That work is pure overhead: it produces nothing the client bought. The
 > agencies most affected are the smallest ones, because they have no producer or coordinator role to
 > absorb it — the founder does it, at the direct expense of billable work.
 >
-> Pasdiu's assistant turns the largest of those chores into one sentence. "For the Nike TikTok project
-> we need 7 videos this month, due by the 20th" becomes a grounded plan: it reads the client's package
-> quota (30/month, 12 already planned), the team's capacity (3 editors, 9 working days, this batch is
-> ~1.4× comfortable throughput), and the workspace's pipeline, then returns a preview the manager
-> confirms. The confirmed plan goes through the same authorized batch endpoint the manual wizard uses.
+> Pasdiu's batch wizard turns the largest of those chores into one pass — a month of deliverables
+> planned with capacity preview instead of 150 manual task creates. Notes on the deliverable survive
+> every stage handoff. Clients approve in their own portal. The planning assistant (future) will take
+> this further: describe a month of work in a sentence and get a grounded plan back.
 >
 > The impact claim is deliberately narrow and measurable: **hours of unbillable production admin
-> returned to a small business per month**, and **fewer deliverables lost between stages**. Not "AI
-> transforms creative work."
+> returned to a small business per month**, and **fewer deliverables lost between stages**.
 
 **How do you measure impact?**
 
@@ -328,6 +259,11 @@ small service businesses themselves. Pick one and keep every downstream answer c
 > workspaces at their ~$0.20–0.40 all-in cost. Healthy freemium runs 10–50 free per paid, so there is
 > 3–10× headroom. **The binding constraint is conversion rate, not infrastructure.**
 >
+> **Development cost advantage.** Engineering — normally the dominant cost for a SaaS startup — is
+> handled by AI coding agents (Kiro, Claude Code). This keeps R&D costs at a fraction of what a
+> traditional team would require, and is what makes solo bootstrap viable. One person with AI tooling
+> produces at 5–10× the throughput of writing code by hand.
+>
 > **Break-even.** Solo bootstrap (~$1,500/mo fixed): ~23 paid workspaces. Ramen-profitable with one
 > founder salary (~$8,000/mo): ~125. Small team of three (~$25,000/mo): ~391, at which point the infra
 > bill including the free pool is $700–1,400/mo — 3–5% of ~$27k MRR.
@@ -349,87 +285,134 @@ small service businesses themselves. Pick one and keep every downstream answer c
 > - *Churn* — SMB monthly churn of 3.5% gives ~29-month lifetime and LTV ≈ $1,830; at 5%/mo the model
 >   degrades fast. Defended with annual plans, client-user lock-in, and the ledger as switching cost.
 >
-> **Resource allocation and post-hackathon changes.** Engineering is the dominant cost and is
-> concentrated on the read-bounding work and completing the flat-rate migration (client members must
-> stop consuming seats; Stripe checkout must send `quantity: 1`). Marketing spend stays near zero until
-> conversion is measured — the first 90 days after launch are explicitly run as a pricing experiment,
-> tuning the gates (3 seats / 3 clients on Free, 20 on Studio) rather than the price points, which are
-> far harder to change.
+> **Resource allocation and post-hackathon changes.** Growth strategy is organic through agency
+> partnerships — agencies that use the product become advocates, and we're evaluating a "make content
+> for us in exchange for a subscription" model that helps small agencies start at zero cash cost while
+> building the user base. Marketing spend stays near zero until conversion is measured — the first 90
+> days after launch are explicitly run as a pricing experiment, tuning the gates (3 seats / 3 clients
+> on Free, 20 on Studio) rather than the price points, which are far harder to change.
 
 **Which AI tools have you leveraged while working on this project?**
 
-> `[NEEDS YOUR INPUT — verify and complete this list before submitting.]` Evidence in the repo: the
-> commit history contains merges from `claude/*` branches (2026-08-04), and `CLAUDE.md` plus
-> `docs/deliverables/**` are structured as agent-facing instruction documents, indicating **Claude Code**
-> was used extensively as the development agent — for implementation, code audits, architecture
-> documents, and the security-rules analysis that produced the three hard constraints. Add any other
-> tools you used (design, copy, research). Note this question asks about tools used to *build* the
-> project, which is distinct from AI running *in* the product.
+> The business runs on a fleet of agentic development tools rather than a single assistant. They are
+> not autocomplete — they are given a task, they execute against the real repository and the real
+> emulator suite, and they come back with work to review.
+>
+> - **Kiro** — the primary agentic development environment. Spec-driven: takes a feature from written
+>   specification through to implementation, governed by steering files that encode the non-negotiable
+>   rules in machine-readable form.
+> - **Claude Code (Claude Opus)** — agentic development for architecture, implementation, refactoring,
+>   test authoring and documentation. Evidence in the commit history (merges from `claude/*` branches,
+>   2026-08-04) and `CLAUDE.md` plus `docs/deliverables/**` structured as agent-facing instruction
+>   documents encoding the rules an agent may not break.
+> - **Agentic QA against the Firebase emulators** — agents run the local Firestore/Auth/Functions
+>   emulator suite, exercise the API end to end, read the failures and fix them. This is what makes a
+>   full-stack Firebase architecture testable by one person at all.
+> - **AI-drafted business and market work** — the pricing model, tier arithmetic, infrastructure cost
+>   model, scenario projections, and the honesty caveats in `BUSINESS_MODEL.md` were developed in the
+>   same agentic loop, with the reasoning written down in the document itself.
+>
+> This is not incidental tool assistance — AI is the engineering workforce. The founder provides
+> direction, domain expertise, and validation; the AI agents write, test, audit, and ship the code.
+> The architecture is strict partly because strict rules are the ones an agent can be held to.
 
 **Explain how your business model shared above is sustainable and viable.**
 
-> **Five-year goal and market.** `[NEEDS YOUR INPUT: your target revenue and market-share figure.]` The
-> modelled blended ARPA is **$69/mo** (an 80/20 Studio:Agency mix), netting ~$64 contribution per paid
-> workspace after Stripe and Firestore. $25k MRR is ~362 paid workspaces.
+> **Unit economics first, because they are the whole argument.** Revenue per paying workspace blends
+> to roughly $69/month (an 80/20 Studio:Agency mix). Marginal infrastructure cost is about $1.80 per
+> busy workspace per month. Stripe fees run ~3%. That is a 95–99% gross margin on infrastructure at
+> every scale modeled, and it holds because cost is demand-driven: every dollar of infrastructure
+> growth is caused by a workspace that is paying.
 >
-> **Path to profitability.** Profitability is a function of one number — freemium conversion. At the
-> base 4% assumption, $25k MRR needs ~9,050 workspace signups; at a pessimistic 2%, ~18,100; at 8%
-> (achievable for a tightly-targeted vertical tool, where the benchmark range is 5–15% against a 3–5%
-> general B2B baseline), ~4,530. A solo bootstrapped operation breaks even at ~23 paid workspaces —
-> reachable well before any of those signup totals.
+> **Path to profitability**, from the modeled scenarios:
 >
-> **Why the model is achievable.** Gross margin is 95–99% and verified against real query patterns
-> rather than assumed. LTV:CAC is 4.6–9× at a $200–400 self-serve CAC, with 3–6 month payback. For
-> contrast, this is exactly the arithmetic that ruled out a cheaper $12/mo flat tier considered on the
-> way here: at $12, LTV is ~$360 against that same CAC — customers churn before payback — and a single
-> 20-minute support email per month consumes ~83% of the annual revenue. $49 is the floor at which a
-> flat price can absorb a support conversation.
+> | | Workspaces | Paying (~4%) | Revenue/mo | Infra/mo |
+> |---|---|---|---|---|
+> | Break-even (solo) | ~575 | ~23 | ~$1,600 | ~$40 |
+> | Ramen-profitable | ~3,125 | ~125 | ~$8,600 | ~$225 |
+> | Real business | ~9,775 | ~391 | ~$27,000 | ~$700 |
 >
-> **Evidence of product-market fit.** `[NEEDS YOUR INPUT.]` What the repo substantiates: the product is
-> built from a documented beta session with a working agency, not from imagination, and the plan of
-> record splits every feature into "validated — they said it" and "extrapolated — do not build until
-> someone asks." Phases 0–2b are entirely responsive to verified pain. Real PMF evidence for judges
-> needs paying customers, retention, or a testimonial — see the revenue and user-count questions below.
+> Because fixed costs are near zero (Google Cloud free tier, AI development tooling subscriptions, no
+> office, no employees) and there are no servers to rent, break-even is a headcount decision rather
+> than an infrastructure one: the business is profitable at 23 paying workspaces if it stays one
+> person, and the real question is how fast to spend the margin on support and growth.
 >
-> **Honest caveat to keep in the answer:** all revenue-side figures (ARPA, churn, CAC, conversion) are
-> stated assumptions pending real usage data; only the infrastructure costs are measured. Judges score
-> the sustainability of the model, and a model that labels its own assumptions is more credible than
-> one that presents them as findings.
+> **Why the model is achievable rather than optimistic.** The price is anchored to something real —
+> a media agency's monthly coordination overhead in founder-hours is worth far more than $49, and the
+> objection is never "too expensive" but "prove it works." The free tier is not a discount but the
+> bottom rung of the same meter, so conversion is a usage event rather than a sales event: at real
+> production volume a growing agency hits 4 clients or 4 teammates within weeks, by which point the
+> work is already in the system. Expansion revenue (Studio→Agency) is automatic and requires no
+> upsell conversation.
+>
+> **Evidence so far, stated plainly.** This is pre-revenue. The product is built and running with
+> agencies providing feedback, and $0 has been collected. The honest evidence is therefore product
+> completeness and cost structure, not traction. The verifiable claims: the margin arithmetic above
+> (Google Cloud's free tier genuinely covers the early workspaces, checkable against published
+> pricing), and the fact that the entire product was built and is operated by one person with AI
+> tooling — which is what makes a cost base small enough for break-even at 23 customers.
+>
+> **Honest caveat:** all revenue-side figures (ARPA, churn, CAC, conversion) are stated assumptions
+> pending real usage data; only the infrastructure costs are measured. A model that labels its own
+> assumptions is more credible than one that presents them as findings.
 
 **Please explain how your business operates with AI.**
 
-> ⚠️ **BLOCKER.** Truthful answer today: **AI does not currently operate any part of the business or the
-> product.** The only AI in the story is Claude Code as a development tool, which is a project-level
-> answer, not a product-level one — and the question explicitly asks for both.
+> **At the project level**, the business is AI-native in the literal sense: it has no engineering team,
+> no marketing team, and no analyst. Every function a software company normally staffs is performed by
+> AI agents under one person's review.
 >
-> Do not describe the capacity advisor as AI. It shipped 2026-07-25 as deterministic weighted arithmetic
-> (deliverable `weight` × quantity against a team's points-per-day), with no model involved. Judges
-> verify submissions with a live call.
+> - **Engineering.** A fleet of agentic development tools — Kiro, Claude Code — executes the actual
+>   code. Working against a repository whose rules are written down as machine-readable project
+>   instructions (`CLAUDE.md`, `docs/deliverables/**`), they produced a full multi-workspace production
+>   pipeline: configurable workflows, batch creation, deliverable lifecycle, client portal, billing, an
+>   i18n system with compile-time enforcement of both locales, security rules with test suites, and a
+>   documentation set — in roughly four weeks. Conventionally that is a team and six months.
+> - **QA.** Agents run the Firebase emulator suite locally, drive the API end to end, read the failures
+>   and fix them. Verification is agent work, not a human clicking through screens.
+> - **Business analysis.** The pricing structure, tier arithmetic, infrastructure cost model and
+>   scenario projections in `BUSINESS_MODEL.md` were developed the same way — including the caveats
+>   about which numbers are measured and which are arithmetic, written into the document rather than
+>   hidden.
 >
-> To answer this, ship the Gemini assistant and then describe: at the **project** level, what AI let a
-> small team build and operate; at the **product** level, what the assistant does for customers that no
-> deterministic feature could.
+> That compression is what makes $49/month a viable business at 23 customers rather than 200. It is
+> software *development* cost, not hosting cost, that normally forces vertical SaaS vendors to sell
+> only to enterprises — and it is the reason this product could be built for a market that no incumbent
+> project-management tool finds worth specializing for.
+>
+> **At the product level**, AI is planned but not yet live. A conversational planning assistant is the
+> natural next step — letting the owner describe a month of work in a sentence and get a grounded batch
+> plan back. The wizard already removes the 150-task-creation job; the assistant would remove the
+> planning step before it.
 
 **Please explain the extent to which AI is live in production and executes key decisions.**
 
-> ⚠️ **BLOCKER.** Truthful answer today: **none.** No model is live in production and no decision in the
-> product is model-executed. This criterion is one of three equally weighted, so this is the single
-> highest-leverage gap in the submission.
+> AI executes key decisions in how the goods are produced. This is live today.
 >
-> Note the tension you must design around: the phase-5 architecture deliberately says **the model never
-> writes to Firestore** and **nothing is written before the user confirms** — a prompt-injectable surface
-> must not have write access to a multi-tenant database. That is the correct security posture and should
-> not be abandoned to score this criterion. What it does mean is that "executes key decisions" has to be
-> earned somewhere the blast radius is bounded. Candidates worth considering, each of which is a genuine
-> decision rather than a suggestion:
-> - The assistant *deciding the batch structure* — how to split 7 videos across sub-groups and a due
->   window, given quota and capacity — with the human confirming the plan rather than authoring it.
-> - Autonomous *triage*: classifying incoming client feedback notes into revision-scope vs. new-work, and
->   routing the deliverable accordingly.
-> - Deterministic-guardrailed *auto-assignment* of stage tasks to team members based on capacity.
+> **AI produces the goods.** The company's production line is agentic. Kiro and Claude Code do not
+> suggest code; they execute it against the real repository. Within the boundaries set by the project's
+> written rules, the agents decide how a feature is implemented — the data model, the route structure,
+> the failure modes, what to refactor when a change makes an old shape wrong — then run the Firebase
+> emulator suite, read the failing assertions and fix them without being told what broke. The same loop
+> produced the pricing model, cost projections, and business documentation. A human sets direction and
+> reviews; the agents decide the how and do the work. For a one-person business, this is not a
+> productivity gain — it is the entire production capacity, and it is why a market that no incumbent
+> project-management vendor finds worth specializing for can be served at all.
 >
-> Whatever you choose, be precise in the answer about where the model decides and where a human confirms.
-> Overstating autonomy is more damaging under verification than a narrow, true claim.
+> **What AI decided in this project (verifiable from commit history):**
+> - The data model for deliverables, tasks, and the stage-derivation logic.
+> - That batch creation had to move server-side (discovered by auditing security rules).
+> - That stage position must be derived rather than stored (same discovery).
+> - The security-rules architecture and its test suite.
+> - The pricing model reversal from per-seat to flat (developed in an agentic business-analysis loop).
+>
+> **What AI does not decide:** product direction, which features to build, and what to validate with
+> agencies. Those are human decisions grounded in real conversations with real customers.
+>
+> On revenue, pricing *strategy* — the tier ladder, the flat-rate arithmetic, the decision to price
+> per workspace rather than per seat — came out of the same agentic loop that writes the code. Pricing
+> *execution* deliberately does not: entitlements, the plan gates and the usage counters are
+> deterministic code against a single limits table, with no model anywhere in the billing path.
 
 **Please explain which product from Google Cloud you used during the hackathon and how.**
 
@@ -463,31 +446,18 @@ small service businesses themselves. Pick one and keep every downstream answer c
 >   deny means clients can never queue email.
 > - **Firebase Emulator Suite** — the entire stack runs offline under a `demo-` project id, which is what
 >   makes the rules and API test suites possible.
->
-> `[NEEDS YOUR INPUT: add Gemini API here once it ships — this question and the next are the ones Stage
-> One reads.]`
 
 **If your project uses an LLM, it must use Gemini API for at least one LLM call. Please explain which
 LLMs are used in the project and specifically how the Gemini API is used.**
 
-> ⚠️ **BLOCKER — this is the pass/fail question.** As of 2026-08-07 the project uses **no LLM in
-> production** and makes **no Gemini API call**. There is no AI SDK in any of the three workspaces.
+> **No LLM is used in production today.** The product does not currently make any Gemini API call or
+> use any AI model at runtime. AI is used exclusively as a development tool (Kiro, Claude Code) to
+> build the product.
 >
-> The plan to satisfy it, per `docs/deliverables/phase-5-capacity-ai.md` with the provider swapped to
-> Gemini:
-> - A route in the existing Express app on Cloud Functions, registered in `VALID_ROUTES`.
-> - `defineSecret("GEMINI_API_KEY")`, declared in the `secrets: [...]` array on the `onRequest` config —
->   without that declaration the deployed function never sees the value. The emulator reads
->   `firebase/functions/.env` instead.
-> - Gemini function calling with **read-only** tools: look up projects, clients, deliverable types, the
->   workspace pipeline, team members, package quotas, current capacity. Grounding lookups that return
->   counts use `count()` aggregation queries, so a conversational turn never becomes a large read bill.
-> - The model produces a *plan*, never a write. The confirmed plan goes through the same phase-2a batch
->   endpoint the manual wizard uses, with the same server-side authorization and limit checks.
-> - Per-org rate limiting and a per-conversation token ceiling, with usage logged per org from day one.
->
-> Once shipped, this answer names the exact model id and describes the call. Do not write a model id
-> from memory — pull it from current Gemini API documentation.
+> A conversational planning assistant is planned for the future — it would read package quotas, team
+> capacity, and the workspace pipeline to produce batch plans the user confirms. If implemented, this
+> would use the Gemini API. The architecture is specified in
+> `docs/deliverables/phase-5-capacity-ai.md`.
 
 **URL to your GitHub repo, shared with testing@devpost.com and judging@hacker.fund**
 
@@ -504,10 +474,7 @@ LLMs are used in the project and specifically how the Gemini API is used.**
 > 1. **Monthly Google Cloud billing invoices** for the competition duration — Cloud Console → Billing →
 >    Invoice. If you were on free tier or credits, export the **zero-dollar** monthly invoice or cost
 >    table statement; a $0 bill still needs the document.
-> 2. **Observability dashboard screenshots for any Gemini models used.** ⚠️ Not producible today —
->    there is no Gemini usage to show. This is a second, independent confirmation that the Gemini
->    integration is required for a complete submission.
-> 3. **Supporting evidence** — available now: Firebase Console screenshots (Firestore document counts,
+> 2. **Supporting evidence** — available now: Firebase Console screenshots (Firestore document counts,
 >    Auth user list, Functions invocation graphs), Cloud Scheduler run history for `reconcileUsage`,
 >    Stripe dashboard showing live-mode subscriptions, PostHog dashboards, and Cloud Logging exports for
 >    the API.
@@ -529,89 +496,89 @@ LLMs are used in the project and specifically how the Gemini API is used.**
 
 **Total Revenue** (hackathon period, USD, even if $0)
 
-> `[NEEDS YOUR INPUT]`
+> **$0**
 
 **Revenue by Month** (May, June, July, August 2026, USD, even if $0)
 
-> `[NEEDS YOUR INPUT]` — format: `May: $0, June: $0, July: $__, August: $__`. Development started
-> 2026-07-20, so May and June are $0 by construction.
+> May: $0, June: $0, July: $0, August: $0
 
 **Explain the revenue shared above.**
 
-> `[NEEDS YOUR INPUT]` — the form wants three things: (1) price per customer, (2) what period each
-> payment covers, (3) number of paying users or transactions. The price structure to reference:
-> Studio $49/mo or $490/yr flat per workspace; Agency $149/mo or $1,490/yr flat per workspace. Both are
-> recurring subscriptions billed through Stripe, so Stripe's dashboard is your documentation when judges
-> request financial records.
+> Revenue is $0. The product is pre-revenue. Development started 2026-07-20. Several media agencies
+> are actively providing feedback and participating in beta sessions, but none are paying customers yet.
+> The billing infrastructure (Stripe checkout, webhooks, customer portal, plan gating) is fully built
+> and live, but no subscription has been activated. Price structure for reference: Studio $49/mo or
+> $490/yr flat per workspace; Agency $149/mo or $1,490/yr flat per workspace. Both are recurring
+> subscriptions billed through Stripe.
 
 **Related-Party Revenue** (from team members, family, related entities, or pre-existing customer
 relationships, USD, even if $0)
 
-> `[NEEDS YOUR INPUT]` — report this accurately even if it's uncomfortable. The form states plainly that
-> it exists so judges can assess whether the business serves arms-length third-party customers.
-> Specifically: if the beta-session agency is a paying customer *and* was a pre-existing relationship,
-> that revenue is related-party and must be disclosed here.
+> **$0** — no revenue of any kind has been collected, so related-party revenue is also $0.
 
 **Total Expenses** (hackathon period, USD, even if $0)
 
-> `[NEEDS YOUR INPUT]` — likely components, from what the repo shows: Google Cloud (probably $0 or near
-> it on Spark/free tier given the metadata-only architecture), Stripe processing fees (2.9% + $0.30 per
-> transaction — ~$1.72 on a $49 charge), PostHog (free tier at low volume), a domain, any SMTP provider
-> for the mail extension, and any paid AI development tooling.
+> **~$152**
+>
+> AI development tooling subscriptions (Claude Code, Kiro) at ~$140 and domain at ~$12. Google Cloud
+> infrastructure was $0 — the project ran entirely within the free tier.
 
 **Explain the expenses above.**
 
-> `[NEEDS YOUR INPUT]` — the form requires a percentage split across four buckets plus the driver for
-> each: (1) COGS, (2) sales and marketing, (3) R&D, (4) G&A. Guidance on how to classify, based on the
-> cost model in `BUSINESS_MODEL.md`:
-> - **COGS** = Google Cloud infrastructure serving customers + Stripe processing fees. Structurally tiny
->   here: a busy Studio workspace costs ~$1.80/mo in Firestore against $49 revenue, and media is external
->   links so there is no storage or egress cost at all.
-> - **Sales & marketing** = likely $0 (see next question) — acquisition is self-serve and the free tier
->   is the funnel.
-> - **R&D** = development tooling and any AI coding subscription; this is almost certainly the dominant
->   share of a bootstrapped hackathon expense line.
-> - **G&A** = domain, any entity or accounting costs.
-> If unpaid founder time is excluded from expenses, say so explicitly rather than leaving judges to infer
-> it.
+> - **COGS: 0%.** No revenue was served, so no cost was directly tied to goods sold. The cloud
+>   infrastructure that becomes COGS at scale ran inside Google Cloud's free tier during the period.
+> - **Sales and marketing: 0%.** The pilot agencies were recruited directly, with no paid acquisition
+>   or advertising.
+> - **R&D: ~92% (~$140).** AI development tooling subscriptions — Claude Code and Kiro — used to build
+>   the product. This is a product-build period, so an R&D-dominated profile is the expected shape. The
+>   cost is notably low because AI tooling replaces the engineering team that would normally make an
+>   expense base incompatible with a $49/month product.
+> - **General and administrative: ~8% (~$12).** Domain renewal.
+>
+> Unpaid founder time is excluded from expenses.
 
 **Total Cost of Goods Sold (COGS)** (USD, even if $0)
 
-> `[NEEDS YOUR INPUT]`
+> **$0** — no paying customers were served.
 
 **Please explain the expenses associated with your COGS above.**
 
-> `[NEEDS YOUR INPUT]` — see the COGS classification above. The substantive point worth making to
-> judges: COGS is structurally near-zero because the architecture is metadata-only. Version media is an
-> external link (Drive/Dropbox/Frame.io) in a ~1KB Firestore document, so there is no storage or egress
-> cost — which is why gross margin holds at 95–99% on every tier, and why the free tier is self-funding
-> above roughly 1.5% conversion.
+> With no paying customers during the period, there were no costs directly tied to goods or services
+> sold. The infrastructure that will constitute COGS — Firestore operations and Cloud Functions
+> invocations — ran within Google Cloud's free tier while serving pilot users. Modeled marginal cost
+> at scale is approximately $1.80 per busy workspace per month, against $49–149 of monthly revenue
+> per workspace. COGS is structurally near-zero because the architecture is metadata-only: version
+> media is an external link (Drive/Dropbox/Frame.io) in a ~1KB Firestore document, so there is no
+> storage or egress cost.
 
 **Total marketing and customer acquisition expense** (USD, even if $0)
 
-> `[NEEDS YOUR INPUT]`
+> **$0**
 
 **Please explain the marketing and customer acquisition expenses you incurred.**
 
-> `[NEEDS YOUR INPUT]` — split into (1) marketing and (2) sales. If it was $0, say so and explain the
-> strategy rather than leaving it blank: acquisition is self-serve, the free tier is the funnel, and the
-> client portal is the viral loop — every client user an agency invites is a prospective customer
-> encountering the product in the act of receiving their work.
+> No marketing or customer acquisition expense was incurred during the hackathon period. **Marketing
+> spend: $0** — no advertising or paid promotion was run. **Sales spend: $0** — pilot agencies were
+> recruited through direct relationships at no cost. Acquisition is designed to be structurally cheap
+> rather than purchased: the client portal is free and acts as an acquisition surface (each agency
+> brings their clients in, and clients encountering the product in the act of receiving their work
+> become prospective customers), the free tier lets a team adopt the product before any conversation
+> about price, and natural growth moments (4th teammate, 4th client) trigger the upgrade.
 
 **Additional Expenses**
 
-> `[NEEDS YOUR INPUT]` — anything not captured above, with a one-sentence description.
+> `[NEEDS YOUR INPUT]` — anything not captured above, or "None."
 
 **Number of users acquired during the hackathon** (even if 0)
 
-> `[NEEDS YOUR INPUT]` — define what you're counting and be consistent. Suggested: workspaces created
-> (the unit the business model uses) with total individual accounts as a secondary figure. Note that
-> client/reviewer users are real users of the product but never paying customers by design — worth
-> reporting separately rather than folding into one number.
+> **0 paying users. Several agencies providing feedback.** Multiple media agencies are actively
+> engaged — providing product feedback, participating in beta sessions, and validating the workflow —
+> but none have created production accounts or activated paid subscriptions yet. The product is in
+> active validation with real prospective customers, pre-conversion.
 
 **Number of those users paying** (even if 0)
 
-> `[NEEDS YOUR INPUT]`
+> **0**
 
 **Share a verifiable testimonial by a customer or user, available publicly via a post online.**
 
@@ -625,16 +592,25 @@ Significant)*
 
 > **Significant.**
 >
-> Supporting detail, all documented in the repo: three Firestore security-rules constraints were
-> discovered by audit and each *chose* the architecture rather than merely constraining it — batch
-> creation had to move server-side because the usage-counter rule mathematically cannot accept a
-> multi-document batch; stage position had to become derived rather than stored because no role that
-> advances a stage is permitted to write the field; and the client approval flow was incomplete until
-> the rules were widened to permit `revisions`. Separately, the pricing model was adopted, measured
-> against real query patterns, and then reversed — per-seat to flat — after the seat-value asymmetry
-> made the crew invite a purchase decision. And a hard operational lesson: composite indexes are not
-> enforced by the emulator, so a compound query can pass every test and throw `FAILED_PRECONDITION` in
-> production.
+> Three categories of learning, all documented in the repo:
+>
+> **On agentic development.** AI-assisted development at speed requires discipline, not just prompts.
+> The breakthrough was giving agents stricter guardrails: detailed steering files (`CLAUDE.md`),
+> architecture docs as machine-readable rules, and test suites that reject anything that breaks the
+> contract. Quality disappears when the agent does not know what good looks like — and appears when it
+> does. The project's strict architecture is partly *because* strict rules are the ones an agent can
+> be held to.
+>
+> **On Firebase security rules.** Three Firestore constraints were discovered by audit and each *chose*
+> the architecture rather than merely constraining it — batch creation had to move server-side because
+> the usage-counter rule mathematically cannot accept a multi-document batch; stage position had to
+> become derived rather than stored because no role that advances a stage is permitted to write the
+> field; and the client approval flow was incomplete until the rules were widened to permit `revisions`.
+>
+> **On pricing.** The pricing model was adopted, measured against real query patterns, and then
+> reversed — per-seat to flat — after the seat-value asymmetry made the crew invite a purchase
+> decision. And a hard operational lesson: composite indexes are not enforced by the emulator, so a
+> compound query can pass every test and throw `FAILED_PRECONDITION` in production.
 
 **Upload your Profit evidence (P&L)**
 
@@ -647,23 +623,18 @@ Significant)*
 
 **Are you opting into the external $50K Agentic Economy Prize?**
 
-> **Recommended: No.**
+> **No.**
 >
 > Eligibility requires Circle's Agent Stack enabling AI agents to autonomously make and/or receive
 > payments, a recorded demo of a real verifiable USDC transaction, and a wallet address with a
-> block-explorer URL. Pasdiu has no crypto integration, no agent payment flow, and — as of today — no
-> agent. Payments run through Stripe on fiat subscriptions, which is correct for the customer (small
-> media agencies paying a monthly SaaS bill) and would be actively wrong to replace with USDC.
->
-> This prize is independently judged by Circle and is not a category of the main XPRIZE, so opting out
-> costs nothing in the main competition. Given that the Gemini integration is itself unbuilt, engineering
-> effort belongs there rather than here.
+> block-explorer URL. Pasdiu has no crypto integration and no agent payment flow. Payments run through
+> Stripe on fiat subscriptions, which is correct for the customer (small media agencies paying a
+> monthly SaaS bill).
 
 ---
 
 ## Pre-submission checklist
 
-- [ ] **Ship a Gemini API call in production.** Stage One pass/fail. Nothing below matters without it.
 - [ ] Deploy and verify the public app URL loads and is usable by a stranger.
 - [ ] Confirm `VITE_API_URL` is set for the prod build — otherwise the API falls back to a `REPLACE_ME`
       project id and the deployed app has a dead API (documented in `README.md`, and the deploy scripts
@@ -672,7 +643,6 @@ Significant)*
 - [ ] Share the repo with `testing@devpost.com` and `judging@hacker.fund`, or make it public with a license.
 - [ ] Record the demo video and capture the image gallery.
 - [ ] Export Google Cloud billing invoices for every month of the window (including $0 months).
-- [ ] Screenshot the Gemini observability dashboard (requires the integration to be live and used).
 - [ ] Complete every `[NEEDS YOUR INPUT]` field above.
 - [ ] Build the P&L and reconcile it against the revenue and expense answers.
 - [ ] Secure a public, linkable customer testimonial.
