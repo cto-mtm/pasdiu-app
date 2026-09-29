@@ -1,18 +1,29 @@
 import type { Request, Response } from "express";
 
 /**
- * Origins permitted to make cross-origin requests. Capacitor origins are
- * included for native builds; APP_URL covers the production frontend.
- * Any origin NOT in this list is rejected (no CORS header → browser blocks).
+ * Origins permitted to make cross-origin requests. In production (K_SERVICE is
+ * set) only the explicit allowlist is honored. In local dev (emulators) any
+ * localhost-like origin is accepted so Vite on any port/interface just works.
  */
-const ALLOWED_ORIGINS: string[] = [
-  "http://localhost:5173",
-  "http://localhost:4000",
-  "http://localhost:5000",
+const isProduction = !!process.env.K_SERVICE;
+
+const PROD_ORIGINS: string[] = [
   "capacitor://localhost",
   "http://localhost",
   ...(process.env.APP_URL ? [process.env.APP_URL] : []),
 ];
+
+function isAllowedOrigin(origin: string): boolean {
+  if (!isProduction) {
+    // Local dev: accept any localhost / 127.0.0.1 origin (any port).
+    return (
+      origin.startsWith("http://localhost") ||
+      origin.startsWith("http://127.0.0.1") ||
+      origin.startsWith("capacitor://")
+    );
+  }
+  return PROD_ORIGINS.includes(origin);
+}
 
 /**
  * Apply CORS headers for all incoming requests and handle the preflight OPTIONS request.
@@ -22,7 +33,7 @@ const ALLOWED_ORIGINS: string[] = [
 export function applyCors(req: Request, res: Response): boolean {
   const origin = req.headers.origin;
 
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+  if (origin && isAllowedOrigin(origin)) {
     res.set("Access-Control-Allow-Origin", origin);
     res.set("Vary", "Origin");
   } else if (!origin) {
